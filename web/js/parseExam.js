@@ -3,6 +3,64 @@
  * and multiple-choice answers from concatenated exam PDF text.
  * Each MC/TF response is taken as a single character from the exam line (format "n. X");
  * the Excel workbook may later define multi-letter correct keys in row 2 (e.g. AB) for grading.
+ *
+ * pdf.js merged text (see pdfText.js) often inserts runs of spaces between words; marker and
+ * MC-line matching tolerates that while preserving the same state machine as mc_parse.py.
+ */
+
+/** Collapses runs of whitespace to a single space for canonical marker comparisons. */
+function collapseSpaces(line) {
+  return line.replace(/\s+/g, " ").trim();
+}
+
+const MC_START = "--> Multiple Choice Answers";
+const MC_END = "--->End Multiple Choice";
+
+/**
+ * @param {string} line processLine output
+ * @returns {{ q: string, ans: string } | null}
+ */
+function parseMcAnswerLine(line) {
+  const dot = line.indexOf(".", 0, 3);
+  if (dot === -1) return null;
+  const q = line.slice(0, dot);
+  if (!/^\d+$/.test(q)) return null;
+  const afterDot = line.slice(dot + 1).trimStart();
+  if (afterDot.length === 0) return null;
+  let ans = afterDot.charAt(0);
+  if (ans === "T" || ans === "t") ans = "A";
+  else if (ans === "F" || ans === "f") ans = "B";
+  return { q, ans };
+}
+
+/**
+ * Matches mc_parse second-loop detection of question end (tolerates extra spaces from pdf.js).
+ * @param {string} line processLine output
+ */
+function matchesEndOfQuestion(line) {
+  const n = collapseSpaces(line);
+  return n.includes("->End of Question") || /->\s*End\s+of\s+Question/.test(n);
+}
+
+/**
+ * Matches "-->Question" with optional spaces from pdf.js (e.g. "-->   Question -1-").
+ * @param {string} line processLine output
+ */
+function matchesQuestionStart(line) {
+  return /-->\s*Question/.test(collapseSpaces(line));
+}
+
+/**
+ * @param {string} line processLine output
+ * @returns {string | null}
+ */
+function tryParseAnonymousNumber(line) {
+  const m = line.match(/^\s*Anonymous\s+Number\s*:\s*(.+)$/i);
+  if (!m) return null;
+  return m[1].trim();
+}
+
+/**
  * @param {string} examText
  * @returns {{ course: string, exam_no: string, mc: Record<string, string> }}
  */
@@ -26,18 +84,13 @@ export function parseExamText(examText) {
   for (const raw of lines) {
     const line = processLine(raw);
     if (inMc) {
-      if (line === "--->End Multiple Choice") {
+      const normMc = collapseSpaces(line);
+      if (normMc.startsWith(MC_END)) {
         inMc = false;
         break;
       }
-      const dot = line.indexOf(".", 0, 3);
-      if (dot === -1) continue;
-      const q = line.slice(0, dot);
-      if (!/^\d+$/.test(q)) continue;
-      let ans = line.slice(dot + 2, dot + 3).trim();
-      if (ans === "T" || ans === "t") ans = "A";
-      if (ans === "F" || ans === "f") ans = "B";
-      mc[q] = ans;
+      const row = parseMcAnswerLine(line);
+      if (row) mc[row.q] = row.ans;
     }
     if (course === "") {
       const pound = line.indexOf("#");
@@ -47,11 +100,15 @@ export function parseExamText(examText) {
       course = line.slice(pound + 1, nextComma).trimStart();
       continue;
     }
-    if (examNo === "" && line.slice(0, 17) === "Anonymous Number:") {
-      examNo = line.slice(18).trimStart();
-      continue;
+    if (examNo === "") {
+      const anon = tryParseAnonymousNumber(line);
+      if (anon !== null) {
+        examNo = anon;
+        continue;
+      }
     }
-    if (line === "--> Multiple Choice Answers") {
+    // Suffix after the label is allowed (e.g. "Answers PM" from some scan exports).
+    if (collapseSpaces(line).startsWith(MC_START)) {
       inMc = true;
       continue;
     }
@@ -66,25 +123,21 @@ export function parseExamText(examText) {
       if (inMc) {
         const dot = line.indexOf(".", 0, 3);
         if (dot === -1) {
-          if (line.indexOf("->End of Question") > -1) {
+          if (matchesEndOfQuestion(line)) {
             inQ = false;
             inMc = false;
             break;
           }
           continue;
         }
-        const q = line.slice(0, dot);
-        if (!/^\d+$/.test(q)) continue;
-        let ans = line.slice(dot + 2, dot + 3).trim();
-        if (ans === "T" || ans === "t") ans = "A";
-        if (ans === "F" || ans === "f") ans = "B";
-        mc[q] = ans;
+        const row = parseMcAnswerLine(line);
+        if (row) mc[row.q] = row.ans;
       }
       if (inQ && (line.indexOf("ultiple") > 0 || line.indexOf("MC") > -1)) {
         inMc = true;
         continue;
       }
-      if (inQ && line.indexOf("->End of Question") > -1) {
+      if (inQ && matchesEndOfQuestion(line)) {
         inQ = false;
         if (inMc) {
           inMc = false;
@@ -92,7 +145,7 @@ export function parseExamText(examText) {
         }
         continue;
       }
-      if (!inQ && line.indexOf("-->Question") > -1) {
+      if (!inQ && matchesQuestionStart(line)) {
         inQ = true;
         continue;
       }
