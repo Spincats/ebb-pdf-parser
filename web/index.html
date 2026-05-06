@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Exam PDF parser</title>
+    <link rel="stylesheet" href="./css/styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Exam PDF parser</h1>
+      <p class="lead">
+        PDFs are parsed entirely in your browser. Nothing is uploaded to a server. Output is an Excel
+        workbook (<code>.xlsx</code>) named from the reconciled course code.
+      </p>
+
+      <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Drop PDF exams here">
+        <p><strong>Drop PDF files here</strong> or</p>
+        <button type="button" class="btn" id="pickBtn">Choose PDFs</button>
+        <input
+          id="fileInput"
+          class="file-input"
+          type="file"
+          accept=".pdf,application/pdf"
+          multiple
+        />
+        <p>Multiple exams in one batch are combined after validation.</p>
+      </div>
+
+      <section id="filePanel" class="panel" hidden>
+        <h2>Selected files</h2>
+        <ul id="fileList" class="file-list"></ul>
+      </section>
+
+      <section id="errorPanel" class="panel messages errors" hidden>
+        <h2>Errors</h2>
+        <ul id="errorList"></ul>
+      </section>
+
+      <section id="warnPanel" class="panel messages warnings" hidden>
+        <h2>Warnings</h2>
+        <ul id="warnList"></ul>
+      </section>
+
+      <button type="button" class="btn btn-primary" id="downloadBtn" disabled>
+        Download grade workbook
+      </button>
+      <p id="status" class="status" aria-live="polite"></p>
+
+      <footer>
+        Essay question counts use the modal value across PDFs from the line &quot;Number of Essay Questions:&quot; on page 1.
+      </footer>
+    </main>
+
+    <script src="./vendor/exceljs/exceljs.min.js"></script>
+    <script type="module" src="./js/app.js"></script>
+  </body>
+</html>

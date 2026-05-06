@@ -1,0 +1,17 @@
+{
+  "name": "exam-parser-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Client-side PDF exam parser and grade workbook generator",
+  "scripts": {
+    "vendor": "node scripts/vendor.mjs",
+    "test": "vitest run"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "exceljs": "^4.4.0",
+    "pdfjs-dist": "^4.10.38",
+    "vitest": "^3.0.5"
+  }
+}
