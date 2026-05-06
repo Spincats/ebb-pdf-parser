@@ -103,7 +103,7 @@ describe("buildGradesWorkbook", () => {
 
     const tot = wb.getWorksheet("Total");
     expect(tot).toBeTruthy();
-    const saRef = tot.getCell(FIRST_STUDENT_ROW, 5).value;
+    const saRef = tot.getCell(FIRST_STUDENT_ROW, 4).value;
     expect(saRef && typeof saRef === "object" && "formula" in saRef).toBe(true);
     expect(String(saRef.formula)).toContain("'ShortAnswer+Essay'!");
   });
@@ -228,10 +228,13 @@ describe("buildGradesWorkbook", () => {
     expect(cut.getCell(2, 1).numFmt).toBe("0.00%");
     expect(cut.getCell(2, 2).value).toBe("F");
     expect(cut.getCell(2, 3).value).toBe(0);
+    expect(cut.getCell(5, 1).value).toBe(0.65);
     expect(cut.getCell(5, 2).value).toBe("C+");
     expect(cut.getCell(5, 3).value).toBe(2.33);
+    expect(cut.getCell(6, 1).value).toBe(0.7);
     expect(cut.getCell(6, 2).value).toBe("B-");
     expect(cut.getCell(6, 3).value).toBe(2.67);
+    expect(cut.getCell(10, 1).value).toBe(0.9);
     expect(cut.getCell(10, 2).value).toBe("A");
     expect(cut.getCell(10, 3).value).toBe(4);
 
@@ -249,7 +252,7 @@ describe("buildGradesWorkbook", () => {
     const names = wb.definedNames.model ?? [];
     const lettersName = names.find((d) => d.name === "letters");
     expect(lettersName).toBeTruthy();
-    expect(lettersName.ranges[0]).toMatch(/Total!\$G\$/);
+    expect(lettersName.ranges[0]).toMatch(/Total!\$F\$/);
 
     const cutoffsName = names.find((d) => d.name === "cutoffs");
     expect(cutoffsName).toBeTruthy();
@@ -271,21 +274,35 @@ describe("buildGradesWorkbook", () => {
     expect(maxPts && typeof maxPts === "object" && "formula" in maxPts).toBe(true);
     expect(String(maxPts.formula)).toContain("'MCtally'");
 
-    expect(tot.getCell(4, 5).value === "" || tot.getCell(4, 5).value == null).toBe(true);
+    expect(tot.getCell(4, 4).value === "" || tot.getCell(4, 4).value == null).toBe(true);
 
-    const pctCell = tot.getCell(4, 6).value;
+    const pctCell = tot.getCell(4, 5).value;
     expect(pctCell && typeof pctCell === "object" && "formula" in pctCell).toBe(true);
     expect(String(pctCell.formula)).toContain("$B$2+$D$2");
 
-    const letterCell = tot.getCell(4, 7).value;
+    const letterCell = tot.getCell(4, 6).value;
     expect(letterCell && typeof letterCell === "object" && "formula" in letterCell).toBe(true);
     expect(String(letterCell.formula)).toContain("VLOOKUP");
     expect(String(letterCell.formula)).toContain("cutoffs");
 
-    const spark = tot.getCell(2, 8).value;
-    expect(spark && typeof spark === "object" && "formula" in spark).toBe(true);
-    expect(String(spark.formula)).toContain("SPARKLINE");
-    expect(String(spark.formula)).toMatch(/\$?F\$4/);
+    // The legacy SPARKLINE-based graph in column H rendered as #NAME? in Excel and was removed;
+    // there should be no merged graph cell and no SPARKLINE formula anywhere on the sheet.
+    const sparkCellValue = tot.getCell(2, 8).value;
+    expect(sparkCellValue == null || sparkCellValue === "").toBe(true);
+    tot.eachRow({ includeEmpty: false }, (row) => {
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        if (cell.value && typeof cell.value === "object" && "formula" in cell.value) {
+          expect(String(cell.value.formula)).not.toContain("SPARKLINE");
+        }
+      });
+    });
+
+    // Total correct column is now sourced from MCtally only; the Total sheet header row has no
+    // "Total correct" cell, and column B holds the MC points header instead.
+    expect(tot.getCell(3, 2).value).toBe("MC pts");
+    tot.getRow(3).eachCell({ includeEmpty: false }, (cell) => {
+      expect(cell.value).not.toBe("Total correct");
+    });
   });
 
   it("uses plain grids for MCtally and Cutoffs (no ListObject tables)", async () => {

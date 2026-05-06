@@ -311,7 +311,6 @@ export async function buildGradesWorkbook(params, ExcelJSMod = null) {
     numStudents,
     nMc,
     nSa,
-    lastStudentRow,
     mcQuoted,
     tallyQuoted,
     saQuoted,
@@ -856,12 +855,12 @@ function buildCutoffsSheet(ws) {
 
 /**
  * Total: one row per student with IDs from MC+TF, tallies from MCtally, SA total from SA sheet,
- * combined fraction of max (MC+TF + SA), letter from Cutoffs, and a SPARKLINE on combined %.
+ * combined fraction of max (MC+TF + SA), and letter from Cutoffs.
  * @param {import("exceljs").Worksheet} ws
  */
 function buildTotalSheet(ws, p) {
-  const { numStudents, nMc, nSa, lastStudentRow, mcQuoted, tallyQuoted, saQuoted } = p;
-  const lastCol = 8;
+  const { numStudents, nMc, nSa, mcQuoted, tallyQuoted, saQuoted } = p;
+  const lastCol = 6;
   ws.mergeCells(TITLE_ROW, 1, TITLE_ROW, lastCol);
   const title = ws.getCell(TITLE_ROW, 1);
   title.value = "Totals (MC, TF, SA, combined percent, letter grade)";
@@ -894,18 +893,16 @@ function buildTotalSheet(ws, p) {
 
   ws.getCell(HEADER_ROW, 1).value = "Anonymous ID";
   ws.getCell(HEADER_ROW, 1).font = { bold: true };
-  ws.getCell(HEADER_ROW, 2).value = "Total correct";
+  ws.getCell(HEADER_ROW, 2).value = "MC pts";
   ws.getCell(HEADER_ROW, 2).font = { bold: true };
-  ws.getCell(HEADER_ROW, 3).value = "MC pts";
+  ws.getCell(HEADER_ROW, 3).value = "TF pts";
   ws.getCell(HEADER_ROW, 3).font = { bold: true };
-  ws.getCell(HEADER_ROW, 4).value = "TF pts";
+  ws.getCell(HEADER_ROW, 4).value = "SA total";
   ws.getCell(HEADER_ROW, 4).font = { bold: true };
-  ws.getCell(HEADER_ROW, 5).value = "SA total";
+  ws.getCell(HEADER_ROW, 5).value = "Overall pct";
   ws.getCell(HEADER_ROW, 5).font = { bold: true };
-  ws.getCell(HEADER_ROW, 6).value = "Overall pct";
+  ws.getCell(HEADER_ROW, 6).value = "Letter";
   ws.getCell(HEADER_ROW, 6).font = { bold: true };
-  ws.getCell(HEADER_ROW, 7).value = "Letter";
-  ws.getCell(HEADER_ROW, 7).font = { bold: true };
 
   const mcPtsColL = nMc > 0 ? colIndexToLetters(3 + nMc) : "C";
   const tfPtsColL = nMc > 0 ? colIndexToLetters(4 + nMc) : "D";
@@ -919,57 +916,33 @@ function buildTotalSheet(ws, p) {
     const row = FIRST_STUDENT_ROW + r;
     ws.getCell(row, 1).value = { formula: `=${mcQuoted}!A${row}` };
     if (nMc > 0) {
-      ws.getCell(row, 2).value = { formula: `=${tallyQuoted}!A${row}` };
-      ws.getCell(row, 3).value = { formula: `=${tallyQuoted}!${mcPtsColL}${row}` };
-      ws.getCell(row, 4).value = { formula: `=${tallyQuoted}!${tfPtsColL}${row}` };
+      ws.getCell(row, 2).value = { formula: `=${tallyQuoted}!${mcPtsColL}${row}` };
+      ws.getCell(row, 3).value = { formula: `=${tallyQuoted}!${tfPtsColL}${row}` };
     } else {
       ws.getCell(row, 2).value = 0;
       ws.getCell(row, 3).value = 0;
-      ws.getCell(row, 4).value = 0;
     }
     if (nSa > 0 && saTotalColL) {
-      ws.getCell(row, 5).value = {
+      ws.getCell(row, 4).value = {
         formula: `=${saQuoted}!${saTotalColL}${row}`,
       };
     } else {
-      ws.getCell(row, 5).value = "";
+      ws.getCell(row, 4).value = "";
     }
-    const pctCell = ws.getCell(row, 6);
+    // Overall percent: combined points (MC pts in B, TF pts in C, SA total in D — blank SA treated as 0)
+    // divided by max combined points (Max MC+TF in $B$2 + Max SA in $D$2). Returns blank when max is zero.
+    const pctCell = ws.getCell(row, 5);
     pctCell.value = {
-      formula: `=IF($B$2+$D$2=0,"",(C${row}+D${row}+IF(E${row}="",0,E${row}))/($B$2+$D$2))`,
+      formula: `=IF($B$2+$D$2=0,"",(B${row}+C${row}+IF(D${row}="",0,D${row}))/($B$2+$D$2))`,
     };
     pctCell.numFmt = "0.00%";
-    ws.getCell(row, 7).value = {
-      formula: `=IF(F${row}="","",VLOOKUP(F${row},cutoffs,2,TRUE))`,
+    ws.getCell(row, 6).value = {
+      formula: `=IF(E${row}="","",VLOOKUP(E${row},cutoffs,2,TRUE))`,
     };
   }
-
-  const sparkMergeR1 = 2;
-  const sparkMergeR2 = 6;
-  ws.mergeCells(sparkMergeR1, lastCol, sparkMergeR2, lastCol);
-  const sparkCell = ws.getCell(sparkMergeR1, lastCol);
-  sparkCell.alignment = { wrapText: true, vertical: "top", horizontal: "center" };
-  if (numStudents > 0) {
-    const f1 = FIRST_STUDENT_ROW;
-    const fL = colIndexToLetters(6);
-    sparkCell.value = {
-      formula: `=IF(COUNT(${fL}$${f1}:${fL}$${lastStudentRow})=0,"",SPARKLINE(${fL}$${f1}:${fL}$${lastStudentRow},{"charttype","line"}))`,
-    };
-  } else {
-    sparkCell.value = "";
-  }
-  ws.getCell(sparkMergeR1, lastCol - 1).value = "Overall % (curve)";
-  ws.getCell(sparkMergeR1, lastCol - 1).font = { italic: true, size: 9 };
-  ws.getCell(sparkMergeR1, lastCol - 1).alignment = {
-    vertical: "top",
-    horizontal: "right",
-    wrapText: true,
-  };
 
   ws.getColumn(1).width = 16;
-  ws.getColumn(2).width = 14;
-  for (let c = 3; c <= 7; c++) {
+  for (let c = 2; c <= lastCol; c++) {
     ws.getColumn(c).width = 12;
   }
-  ws.getColumn(8).width = 14;
 }

@@ -33,24 +33,25 @@ export const CUTOFFS_GPA_WITH_PART_COL = 7;
 
 /**
  * Total sheet column (1-based) where final letter grades are written; workbook name `letters` uses this column.
- * Columns: A ID, B total correct, C MC pts, D TF pts, E SA total, F overall pct, G letter.
+ * Columns: A ID, B MC pts, C TF pts, D SA total, E overall pct, F letter.
  */
-export const TOTAL_LETTER_COL = 7;
+export const TOTAL_LETTER_COL = 6;
 
 /**
- * [minFraction, letterGrade, gpa] — literals from F25 Grades.xlsx Cutoffs (ascending min for VLOOKUP).
+ * [minFraction, letterGrade, gpa] in ascending min for VLOOKUP approximate match.
+ * Ladder: A starts at 90% and each grade level steps down 5%; F is the catch-all at 0%.
  * Grades: F, D, C, C+, B-, B, B+, A-, A.
  */
 export const F25_GRADE_CUTOFF_ROWS = [
   [0, "F", 0],
-  [0.35, "D", 1],
-  [0.4, "C", 2],
-  [0.45, "C+", 2.33],
-  [0.48, "B-", 2.67],
-  [0.6, "B", 3],
-  [0.73, "B+", 3.33],
-  [0.79, "A-", 3.67],
-  [0.86, "A", 4],
+  [0.55, "D", 1],
+  [0.6, "C", 2],
+  [0.65, "C+", 2.33],
+  [0.7, "B-", 2.67],
+  [0.75, "B", 3],
+  [0.8, "B+", 3.33],
+  [0.85, "A-", 3.67],
+  [0.9, "A", 4],
 ];
 
 /** MCtally: row for points and range inputs (1-based) */
