@@ -5,9 +5,20 @@ import {
   buildMcKeyMatchFormula,
   buildMcKeyMatchFormulaForSheet,
   distinctSortedAnswersForQuestion,
+  isTfStyleMcColumn,
   sortMcAnswerChoices,
 } from "../js/buildGradesWorkbook.js";
 import { quoteSheetNameForFormula } from "../js/colUtils.js";
+import {
+  FIRST_STUDENT_ROW,
+  MC_SUMMARY_GAP_ROWS,
+  MC_TALLY_INPUT_ROW,
+  MC_TALLY_MC_FIRST_Q_COL,
+  MC_TALLY_MC_LAST_Q_COL,
+  MC_TALLY_TF_FIRST_Q_COL,
+  MC_TALLY_TF_LAST_Q_COL,
+  SA_TRAILER_HEADERS,
+} from "../js/gradesSpec.js";
 
 describe("sortMcAnswerChoices", () => {
   it("orders single letters A-Z before other tokens", () => {
@@ -18,11 +29,15 @@ describe("sortMcAnswerChoices", () => {
 describe("distinctSortedAnswersForQuestion", () => {
   it("returns only values present for that question", () => {
     const exams = new Map([
-      ["1", { 1: "A", 2: "E" }],
-      ["2", { 1: "B", 2: "D" }],
+      ["anon-fake-001", { 1: "A", 2: "E" }],
+      ["anon-fake-002", { 1: "B", 2: "D" }],
     ]);
-    expect(distinctSortedAnswersForQuestion("1", ["1", "2"], exams)).toEqual(["A", "B"]);
-    expect(distinctSortedAnswersForQuestion("2", ["1", "2"], exams)).toEqual(["D", "E"]);
+    expect(
+      distinctSortedAnswersForQuestion("1", ["anon-fake-001", "anon-fake-002"], exams)
+    ).toEqual(["A", "B"]);
+    expect(
+      distinctSortedAnswersForQuestion("2", ["anon-fake-001", "anon-fake-002"], exams)
+    ).toEqual(["D", "E"]);
   });
 });
 
@@ -45,14 +60,14 @@ describe("buildMcKeyMatchFormula", () => {
 });
 
 describe("buildGradesWorkbook", () => {
-  it("writes MC table and per-question summary COUNTIF rows for observed answers only", async () => {
+  it("writes MC table and F25-style horizontal summary (COUNTIF/COUNTA proportions)", async () => {
     const exams = new Map([
-      ["10", { 1: "A", 2: "B" }],
-      ["20", { 1: "A", 2: "A" }],
+      ["anon-fake-010", { 1: "A", 2: "B" }],
+      ["anon-fake-020", { 1: "A", 2: "A" }],
     ]);
     const blob = await buildGradesWorkbook(
       {
-        reconciledCourse: "TEST-101",
+        reconciledCourse: "ZZ-UNIT-9101",
         nSa: 2,
         exams,
       },
@@ -65,31 +80,36 @@ describe("buildGradesWorkbook", () => {
     const mc = wb.getWorksheet("MC+TF");
     expect(mc).toBeTruthy();
 
-    // lastStudentRow=5, summary starts 14; Q1 Count "A" at row 17 col B (see writeMcPerQuestionSummaries)
-    const countAq1 = mc.getCell(17, 2);
-    expect(
-      countAq1.value &&
-        typeof countAq1.value === "object" &&
-        "formula" in countAq1.value
-    ).toBe(true);
-    expect(String(countAq1.value.formula)).toContain("COUNTIF");
-    expect(String(countAq1.value.formula)).toContain("tblMC");
-    expect(String(countAq1.value.formula)).toContain('"A"');
+    const numStudents = 2;
+    const lastStudentRow = FIRST_STUDENT_ROW + numStudents - 1;
+    const baseRow = lastStudentRow + MC_SUMMARY_GAP_ROWS;
+    const rowA = baseRow + 2;
+    const rowB = baseRow + 3;
 
-    // Q2 block: Count "B" row 24 col C
-    const countBq2 = mc.getCell(24, 3);
-    expect(String(countBq2.value.formula)).toContain("COUNTIF");
-    expect(String(countBq2.value.formula)).toContain('"B"');
+    const pctAq1 = mc.getCell(rowA, 2);
+    expect(
+      pctAq1.value &&
+        typeof pctAq1.value === "object" &&
+        "formula" in pctAq1.value
+    ).toBe(true);
+    expect(String(pctAq1.value.formula)).toContain("COUNTIF");
+    expect(String(pctAq1.value.formula)).toContain("COUNTA");
+    expect(String(pctAq1.value.formula)).toContain("tblMC");
+    expect(String(pctAq1.value.formula)).toContain("$A$" + rowA);
+
+    const pctBq2 = mc.getCell(rowB, 3);
+    expect(String(pctBq2.value.formula)).toContain("COUNTIF");
+    expect(String(pctBq2.value.formula)).toContain("$A$" + rowB);
   });
 
-  it("includes extra answer letters when present (e.g. five options)", async () => {
+  it("includes E row formulas when five-option answers appear", async () => {
     const exams = new Map([
-      ["1", { 1: "A", 2: "E" }],
-      ["2", { 1: "C", 2: "E" }],
+      ["anon-fake-001", { 1: "A", 2: "E" }],
+      ["anon-fake-002", { 1: "C", 2: "E" }],
     ]);
     const blob = await buildGradesWorkbook(
       {
-        reconciledCourse: "X",
+        reconciledCourse: "ZZ-UNIT-9102",
         nSa: 1,
         exams,
       },
@@ -100,21 +120,83 @@ describe("buildGradesWorkbook", () => {
     await wb.xlsx.load(buf);
     const mc = wb.getWorksheet("MC+TF");
 
-    const formulas = [];
-    for (let r = 1; r <= 80; r++) {
-      const v = mc.getCell(r, 3).value;
-      if (v && typeof v === "object" && "formula" in v) {
-        formulas.push(String(v.formula));
-      }
-    }
-    const hasE = formulas.some((f) => f.includes('"E"') && f.includes("COUNTIF"));
-    expect(hasE).toBe(true);
+    const numStudents = 2;
+    const lastStudentRow = FIRST_STUDENT_ROW + numStudents - 1;
+    const baseRow = lastStudentRow + MC_SUMMARY_GAP_ROWS;
+    const rowE = baseRow + 6;
+    const f = String(mc.getCell(rowE, 3).value.formula);
+    expect(f).toContain("COUNTIF");
+    expect(f).toContain("$A$" + rowE);
+  });
+
+  it("omits C-E summary formulas for TF-style columns (only A/B observed)", async () => {
+    const exams = new Map([
+      ["anon-fake-001", { 1: "A", 2: "B" }],
+      ["anon-fake-002", { 1: "B", 2: "A" }],
+    ]);
+    expect(
+      isTfStyleMcColumn("1", ["anon-fake-001", "anon-fake-002"], exams)
+    ).toBe(true);
+    const blob = await buildGradesWorkbook(
+      { reconciledCourse: "ZZ-UNIT-9103", nSa: 0, exams },
+      ExcelJS
+    );
+    const buf = await blob.arrayBuffer();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    const mc = wb.getWorksheet("MC+TF");
+    const numStudents = 2;
+    const lastStudentRow = FIRST_STUDENT_ROW + numStudents - 1;
+    const baseRow = lastStudentRow + MC_SUMMARY_GAP_ROWS;
+    const rowC = baseRow + 4;
+    expect(mc.getCell(rowC, 2).value).toBeNull();
+  });
+
+  it("does not put instructional text on SA row 2 and writes TOTAL as SUM over tblSA", async () => {
+    const exams = new Map([["anon-fake-001", { 1: "A" }]]);
+    const blob = await buildGradesWorkbook(
+      { reconciledCourse: "ZZ-UNIT-9104", nSa: 3, exams },
+      ExcelJS
+    );
+    const buf = await blob.arrayBuffer();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    const sa = wb.getWorksheet("ShortAnswer+Essay");
+    expect(sa).toBeTruthy();
+    const r2a = sa.getCell(2, 1).value;
+    expect(r2a === null || r2a === "").toBe(true);
+
+    const totalCol = 2 + 3 + SA_TRAILER_HEADERS.indexOf("TOTAL");
+    const totalF = sa.getCell(FIRST_STUDENT_ROW, totalCol).value;
+    expect(totalF && typeof totalF === "object" && "formula" in totalF).toBe(true);
+    expect(String(totalF.formula)).toContain("SUM(tblSA");
+  });
+
+  it("adds MC conditional formatting including colorScale on summary proportions", async () => {
+    const exams = new Map([
+      ["anon-fake-001", { 1: "A", 2: "C" }],
+      ["anon-fake-002", { 1: "B", 2: "D" }],
+    ]);
+    const blob = await buildGradesWorkbook(
+      { reconciledCourse: "ZZ-UNIT-9105", nSa: 0, exams },
+      ExcelJS
+    );
+    const buf = await blob.arrayBuffer();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    const mc = wb.getWorksheet("MC+TF");
+    const cfs = mc.conditionalFormattings ?? [];
+    const hasColorScale = cfs.some((c) =>
+      (c.rules ?? []).some((r) => r.type === "colorScale")
+    );
+    expect(hasColorScale).toBe(true);
+    expect(cfs.length).toBeGreaterThanOrEqual(2);
   });
 
   it("puts per-question Ok on MCtally with key-match formulas referencing MC+TF row 2", async () => {
-    const exams = new Map([["1", { 1: "A" }]]);
+    const exams = new Map([["anon-fake-001", { 1: "A" }]]);
     const blob = await buildGradesWorkbook(
-      { reconciledCourse: "K", nSa: 0, exams },
+      { reconciledCourse: "ZZ-UNIT-9106", nSa: 0, exams },
       ExcelJS
     );
     const buf = await blob.arrayBuffer();
@@ -170,6 +252,9 @@ describe("buildGradesWorkbook", () => {
     expect(String(g18.formula)).toContain("B21");
     expect(cut.getCell(17, 2).value).toBe("Participation Adj. Positive");
     expect(cut.getCell(20, 2).value).toBe("Participation Adj. Negative");
+    expect(cut.getCell(18, 2).value).toBe(0);
+    expect(cut.getCell(21, 2).value).toBe(0);
+    expect(cut.getCell(18, 3).value == null || cut.getCell(18, 3).value === "").toBe(true);
 
     const tot = wb.getWorksheet("Total");
     expect(tot).toBeTruthy();
@@ -185,12 +270,12 @@ describe("buildGradesWorkbook", () => {
 
   it("sizes tblTally and tblCutoffs to student and band counts", async () => {
     const exams = new Map([
-      ["1", { 1: "A", 2: "B" }],
-      ["2", { 1: "B", 2: "A" }],
-      ["3", { 1: "A", 2: "A" }],
+      ["anon-fake-001", { 1: "A", 2: "B" }],
+      ["anon-fake-002", { 1: "B", 2: "A" }],
+      ["anon-fake-003", { 1: "A", 2: "A" }],
     ]);
     const blob = await buildGradesWorkbook(
-      { reconciledCourse: "Z", nSa: 0, exams },
+      { reconciledCourse: "ZZ-UNIT-9107", nSa: 0, exams },
       ExcelJS
     );
     const buf = await blob.arrayBuffer();
@@ -207,5 +292,51 @@ describe("buildGradesWorkbook", () => {
     expect(tblCut).toBeTruthy();
     const cutRef = tblCut.ref ?? tblCut.model?.tableRef;
     expect(cutRef).toBe("A1:E10");
+  });
+
+  it("stores MC/TF question index overrides on MCtally input row (columns O-R)", async () => {
+    const exams = new Map([
+      ["anon-fake-001", { 1: "A", 2: "B", 3: "C" }],
+      ["anon-fake-002", { 1: "B", 2: "A", 3: "C" }],
+    ]);
+    const ir = MC_TALLY_INPUT_ROW;
+    const blob = await buildGradesWorkbook(
+      {
+        reconciledCourse: "ZZ-UNIT-9200",
+        nSa: 0,
+        exams,
+        tallyMcFirst: 1,
+        tallyMcLast: 2,
+        tallyTfFirst: 3,
+        tallyTfLast: 3,
+      },
+      ExcelJS
+    );
+    const buf = await blob.arrayBuffer();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    const tally = wb.getWorksheet("MCtally");
+    expect(tally.getCell(ir, MC_TALLY_MC_FIRST_Q_COL).value).toBe(1);
+    expect(tally.getCell(ir, MC_TALLY_MC_LAST_Q_COL).value).toBe(2);
+    expect(tally.getCell(ir, MC_TALLY_TF_FIRST_Q_COL).value).toBe(3);
+    expect(tally.getCell(ir, MC_TALLY_TF_LAST_Q_COL).value).toBe(3);
+  });
+
+  it("throws when MC and TF tally ranges overlap", async () => {
+    const exams = new Map([["anon-fake-001", { 1: "A", 2: "B" }]]);
+    await expect(
+      buildGradesWorkbook(
+        {
+          reconciledCourse: "ZZ-UNIT-9201",
+          nSa: 0,
+          exams,
+          tallyMcFirst: 1,
+          tallyMcLast: 2,
+          tallyTfFirst: 2,
+          tallyTfLast: 2,
+        },
+        ExcelJS
+      )
+    ).rejects.toThrow(/overlap/);
   });
 });

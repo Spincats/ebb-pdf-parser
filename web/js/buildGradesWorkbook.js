@@ -1,5 +1,9 @@
 import { colIndexToLetters, quoteSheetNameForFormula } from "./colUtils.js";
 import {
+  applyStudentCountToExams,
+  validateMcTallyQuestionRanges,
+} from "./workbookExport.js";
+import {
   CUTOFFS_DATA_FIRST_ROW,
   CUTOFFS_DATA_LAST_ROW,
   CUTOFFS_HEADER_ROW,
@@ -14,7 +18,6 @@ import {
   FIRST_STUDENT_ROW,
   HEADER_ROW,
   MC_ANSWER_KEY_ROW,
-  MC_SUMMARY_BLOCK_GAP_ROWS,
   MC_SUMMARY_GAP_ROWS,
   MC_TALLY_INPUT_ROW,
   MC_TALLY_MC_FIRST_Q_COL,
@@ -33,6 +36,14 @@ import {
   TITLE_ROW,
   TOTAL_LETTER_COL,
 } from "./gradesSpec.js";
+
+/** Title band fill aligned with F25 MC sheet header styling. */
+const F25_TITLE_FILL = {
+  type: "pattern",
+  pattern: "solid",
+  fgColor: { argb: "FFEFEFEF" },
+  bgColor: { argb: "FFF3F3F3" },
+};
 
 /**
  * @param {string} qid
@@ -97,11 +108,22 @@ export function sortMcAnswerChoices(keys) {
 }
 
 /**
- * Escapes a literal for use inside an Excel double-quoted string in a formula.
- * @param {string} s
+ * True when every non-empty submitted answer for the question is a single letter A or B only
+ * (omit C-E summary proportions for that column, matching F25 TF-style columns).
+ *
+ * @param {string} qid
+ * @param {string[]} studentIds
+ * @param {Map<string, Record<string, string>>} exams
+ * @returns {boolean}
  */
-function escapeExcelQuotedLiteral(s) {
-  return s.replace(/"/g, '""');
+export function isTfStyleMcColumn(qid, studentIds, exams) {
+  const vals = collectAnswersForQuestion(qid, studentIds, exams);
+  if (vals.length === 0) return false;
+  for (const raw of vals) {
+    const ch = String(raw).trim().charAt(0).toUpperCase();
+    if (ch !== "A" && ch !== "B") return false;
+  }
+  return true;
 }
 
 /**
@@ -134,8 +156,20 @@ export function buildMcKeyMatchFormulaForSheet(sheetPrefix, mcCol1Based, student
 }
 
 /**
+ * @typedef {object} BuildGradesWorkbookParams
+ * @property {string} reconciledCourse
+ * @property {number} nSa short-answer / essay column count
+ * @property {Map<string, Record<string, string>>} exams anonymous ID to MC answers
+ * @property {number | null | undefined} [studentCount] when set, trim or pad rows (see {@link applyStudentCountToExams})
+ * @property {number | null | undefined} [tallyMcFirst] MCtally MC Q first (1-based); default 1 or 0 if no questions
+ * @property {number | null | undefined} [tallyMcLast] MCtally MC Q last (1-based); default nMc
+ * @property {number | null | undefined} [tallyTfFirst] MCtally TF Q first; default 0 (TF off)
+ * @property {number | null | undefined} [tallyTfLast] MCtally TF Q last; default 0
+ */
+
+/**
  * @param {typeof import("exceljs").default | import("exceljs").default} ExcelJSMod
- * @param {{ reconciledCourse: string, nSa: number, exams: Map<string, Record<string, string>> }} params
+ * @param {BuildGradesWorkbookParams} params
  * @returns {Promise<Blob>}
  */
 export async function buildGradesWorkbook(params, ExcelJSMod = null) {
@@ -144,13 +178,18 @@ export async function buildGradesWorkbook(params, ExcelJSMod = null) {
     throw new Error("ExcelJS is not loaded (expected global ExcelJS from vendor script).");
   }
 
-  const { reconciledCourse, nSa, exams } = params;
-  const studentIds = [...exams.keys()].sort((a, b) => {
-    const na = parseInt(a, 10);
-    const nb = parseInt(b, 10);
-    if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
-    return a.localeCompare(b);
-  });
+  const {
+    reconciledCourse,
+    nSa,
+    exams: examsInput,
+    studentCount,
+    tallyMcFirst: inMcFirst,
+    tallyMcLast: inMcLast,
+    tallyTfFirst: inTfFirst,
+    tallyTfLast: inTfLast,
+  } = params;
+
+  const { exams, studentIds } = applyStudentCountToExams(examsInput, studentCount);
   const numStudents = studentIds.length;
 
   /** @type {Set<string>} */
@@ -161,6 +200,37 @@ export async function buildGradesWorkbook(params, ExcelJSMod = null) {
   }
   const mcKeys = [...mcKeySet].sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
   const nMc = mcKeys.length;
+
+  const tallyMcFirst =
+    inMcFirst != null && Number.isFinite(inMcFirst)
+      ? Math.floor(inMcFirst)
+      : nMc > 0
+        ? 1
+        : 0;
+  const tallyMcLast =
+    inMcLast != null && Number.isFinite(inMcLast)
+      ? Math.floor(inMcLast)
+      : nMc > 0
+        ? nMc
+        : 0;
+  let tallyTfFirst =
+    inTfFirst != null && Number.isFinite(inTfFirst) ? Math.floor(inTfFirst) : 0;
+  let tallyTfLast =
+    inTfLast != null && Number.isFinite(inTfLast) ? Math.floor(inTfLast) : 0;
+  if (tallyTfFirst <= 0 || tallyTfLast <= 0) {
+    tallyTfFirst = 0;
+    tallyTfLast = 0;
+  }
+  const rangeErr = validateMcTallyQuestionRanges(
+    nMc,
+    tallyMcFirst,
+    tallyMcLast,
+    tallyTfFirst,
+    tallyTfLast
+  );
+  if (rangeErr) {
+    throw new Error(rangeErr);
+  }
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "Exam parser web";
@@ -205,6 +275,10 @@ export async function buildGradesWorkbook(params, ExcelJSMod = null) {
     numStudents,
     lastStudentRow,
     mcQuoted,
+    tallyMcFirst,
+    tallyMcLast,
+    tallyTfFirst,
+    tallyTfLast,
   });
 
   const cutWs = wb.addWorksheet(SHEET_CUTOFFS);
@@ -244,11 +318,8 @@ function buildSaSheet(ws, p) {
   const t = ws.getCell(TITLE_ROW, 1);
   t.value = `Short Answer + Essay — ${reconciledCourse}`;
   t.font = { bold: true, size: 14 };
+  t.fill = F25_TITLE_FILL;
   t.alignment = { vertical: "middle", horizontal: "center" };
-
-  ws.getCell(MC_ANSWER_KEY_ROW, 1).value =
-    "Optional row (aligns with MC sheet layout). SA scores start in row below headers.";
-  ws.getCell(MC_ANSWER_KEY_ROW, 1).font = { italic: true, size: 9 };
 
   ws.getCell(HEADER_ROW, 1).value = "Anonymous ID";
   ws.getCell(HEADER_ROW, 1).font = { bold: true };
@@ -288,11 +359,24 @@ function buildSaSheet(ws, p) {
     c++;
   }
 
+  const totalTrailerIndex = SA_TRAILER_HEADERS.indexOf("TOTAL");
+  const totalCol =
+    totalTrailerIndex >= 0 ? 2 + nSa + totalTrailerIndex : null;
+
   for (let r = 0; r < numStudents; r++) {
     const row = FIRST_STUDENT_ROW + r;
     ws.getCell(row, 1).value = studentIds[r];
     for (let tc = 0; tc < SA_TRAILER_HEADERS.length; tc++) {
-      ws.getCell(row, 2 + nSa + tc).value = null;
+      const colIndex = 2 + nSa + tc;
+      if (totalCol !== null && colIndex === totalCol && nSa > 0) {
+        const totalF =
+          nSa === 1
+            ? "=tblSA[[#This Row],[SA_1]]"
+            : `=SUM(tblSA[[#This Row],[SA_1]:[SA_${nSa}]])`;
+        ws.getCell(row, colIndex).value = { formula: totalF };
+      } else {
+        ws.getCell(row, colIndex).value = null;
+      }
     }
   }
 
@@ -321,6 +405,7 @@ function buildMcSheet(ws, p) {
   const t = ws.getCell(TITLE_ROW, 1);
   t.value = `Multiple choice / True-False — ${reconciledCourse}`;
   t.font = { bold: true, size: 14 };
+  t.fill = F25_TITLE_FILL;
   t.alignment = { vertical: "middle", horizontal: "center" };
 
   ws.getCell(MC_ANSWER_KEY_ROW, 1).value =
@@ -382,65 +467,150 @@ function buildMcSheet(ws, p) {
   }
 
   if (nMc > 0) {
-    writeMcPerQuestionSummaries(ws, {
+    writeMcSummaryGrid(ws, {
       mcKeys,
       studentIds,
       exams,
       lastStudentRow,
     });
+    applyMcConditionalFormatting(ws, {
+      mcKeys,
+      studentIds,
+      exams,
+      lastStudentRow,
+      nMc,
+    });
   }
 }
 
 /**
- * One vertical block per MC question: stats only for that column, with COUNTIF rows
- * for each answer value that appears in the batch for that question (so T/F shows A,B only;
- * five-option MC shows A through E when present).
+ * F25-style horizontal summary: question row, CORRECT (= row-2 key), then A-E as share of
+ * non-blank responses (COUNTIF/COUNTA). TF-style columns omit C-E formulas.
+ *
  * @param {import("exceljs").Worksheet} ws
  */
-function writeMcPerQuestionSummaries(ws, ctx) {
+function writeMcSummaryGrid(ws, ctx) {
   const { mcKeys, studentIds, exams, lastStudentRow } = ctx;
-  let row = lastStudentRow + MC_SUMMARY_GAP_ROWS;
+  const baseRow = lastStudentRow + MC_SUMMARY_GAP_ROWS;
+  const letters = ["A", "B", "C", "D", "E"];
 
   for (let qi = 0; qi < mcKeys.length; qi++) {
     const qid = mcKeys[qi];
-    const excelCol = 2 + qi;
-    const colName = mcTableColumnName(qid);
-    const choices = distinctSortedAnswersForQuestion(qid, studentIds, exams);
-
-    ws.getCell(row, 1).value = `Question ${qid} (summary)`;
-    ws.getCell(row, 1).font = { bold: true, italic: true };
-    ws.getCell(row, excelCol).value = `Q${qid}`;
-    ws.getCell(row, excelCol).font = { bold: true };
-    row++;
-
-    const rows = [
-      {
-        label: "Non-blank",
-        formula: `COUNTA(tblMC[[#Data],[${colName}]])`,
-      },
-      {
-        label: "Blank",
-        formula: `COUNTBLANK(tblMC[[#Data],[${colName}]])`,
-      },
-      ...choices.map((ans) => ({
-        label: `Count "${ans}"`,
-        formula: `COUNTIF(tblMC[[#Data],[${colName}]],"${escapeExcelQuotedLiteral(ans)}")`,
-      })),
-      {
-        label: "Students",
-        formula: `ROWS(tblMC[[#Data],[${colName}]])`,
-      },
-    ];
-
-    for (const spec of rows) {
-      ws.getCell(row, 1).value = spec.label;
-      ws.getCell(row, 1).font = { italic: true };
-      ws.getCell(row, excelCol).value = { formula: spec.formula };
-      row++;
-    }
-
-    row += MC_SUMMARY_BLOCK_GAP_ROWS;
+    const col = 2 + qi;
+    ws.getCell(baseRow, col).value = qid;
+    ws.getCell(baseRow, col).font = { bold: true };
   }
+
+  const correctRow = baseRow + 1;
+  ws.getCell(correctRow, 1).value = "CORRECT";
+  ws.getCell(correctRow, 1).font = { bold: true };
+  for (let qi = 0; qi < mcKeys.length; qi++) {
+    const col = 2 + qi;
+    const colL = colIndexToLetters(col);
+    ws.getCell(correctRow, col).value = {
+      formula: `=${colL}$${MC_ANSWER_KEY_ROW}`,
+    };
+  }
+
+  for (let li = 0; li < letters.length; li++) {
+    const letter = letters[li];
+    const row = baseRow + 2 + li;
+    ws.getCell(row, 1).value = letter;
+    ws.getCell(row, 1).font = { bold: true };
+
+    for (let qi = 0; qi < mcKeys.length; qi++) {
+      const qid = mcKeys[qi];
+      const col = 2 + qi;
+      const colName = mcTableColumnName(qid);
+      const tf = isTfStyleMcColumn(qid, studentIds, exams);
+      if (tf && (letter === "C" || letter === "D" || letter === "E")) {
+        continue;
+      }
+      const aCell = `$A$${row}`;
+      const f = `IFERROR(COUNTIF(tblMC[[#Data],[${colName}]],${aCell})/COUNTA(tblMC[[#Data],[${colName}]]),"")`;
+      const cell = ws.getCell(row, col);
+      cell.value = { formula: f };
+      cell.numFmt = "0.00%";
+    }
+  }
+}
+
+/**
+ * MC+TF: answer-area highlight (correct vs incorrect vs blank) and color scale on A-E proportion rows.
+ *
+ * @param {import("exceljs").Worksheet} ws
+ */
+function applyMcConditionalFormatting(ws, ctx) {
+  const { mcKeys, studentIds, exams, lastStudentRow, nMc } = ctx;
+  if (nMc <= 0) return;
+
+  const kr = MC_ANSWER_KEY_ROW;
+  const fr = FIRST_STUDENT_ROW;
+  const colB = colIndexToLetters(2);
+  const lastAnsL = colIndexToLetters(1 + nMc);
+  const refAns = `${colB}${fr}:${lastAnsL}${lastStudentRow}`;
+  const correctF = `AND(LEN(TRIM(${colB}${fr}))>0,NOT(ISERROR(SEARCH(UPPER(LEFT(TRIM(${colB}${fr}),1)),UPPER(${colB}$${kr})))))`;
+  const wrongF = `AND(LEN(TRIM(${colB}${fr}))>0,ISERROR(SEARCH(UPPER(LEFT(TRIM(${colB}${fr}),1)),UPPER(${colB}$${kr}))))`;
+
+  ws.addConditionalFormatting({
+    ref: refAns,
+    rules: [
+      {
+        type: "expression",
+        priority: 2,
+        formulae: [correctF],
+        style: {
+          fill: {
+            type: "pattern",
+            pattern: "solid",
+            bgColor: { argb: "FFB7E1CD" },
+          },
+        },
+      },
+      {
+        type: "expression",
+        priority: 3,
+        formulae: [wrongF],
+        style: {
+          fill: {
+            type: "pattern",
+            pattern: "solid",
+            bgColor: { argb: "FFF4C7C3" },
+          },
+        },
+      },
+    ],
+  });
+
+  const baseRow = lastStudentRow + MC_SUMMARY_GAP_ROWS;
+  const firstLetRow = baseRow + 2;
+  const summaryParts = [];
+  for (let qi = 0; qi < mcKeys.length; qi++) {
+    const colL = colIndexToLetters(2 + qi);
+    const tf = isTfStyleMcColumn(mcKeys[qi], studentIds, exams);
+    const lastR = tf ? baseRow + 3 : baseRow + 6;
+    summaryParts.push(`${colL}${firstLetRow}:${colL}${lastR}`);
+  }
+
+  ws.addConditionalFormatting({
+    ref: summaryParts.join(" "),
+    rules: [
+      {
+        type: "colorScale",
+        priority: 4,
+        cfvo: [
+          { type: "min", value: 0 },
+          { type: "percentile", value: 50 },
+          { type: "max", value: 0 },
+        ],
+        color: [
+          { argb: "FFFFFFFF" },
+          { argb: "FFFFFFFF" },
+          { argb: "FF6FA8DC" },
+        ],
+      },
+    ],
+  });
 }
 
 /**
@@ -450,12 +620,23 @@ function writeMcPerQuestionSummaries(ws, ctx) {
  * @param {import("exceljs").Worksheet} ws
  */
 function buildMcTallySheet(ws, p) {
-  const { mcKeys, nMc, numStudents, lastStudentRow, mcQuoted } = p;
+  const {
+    mcKeys,
+    nMc,
+    numStudents,
+    lastStudentRow,
+    mcQuoted,
+    tallyMcFirst,
+    tallyMcLast,
+    tallyTfFirst,
+    tallyTfLast,
+  } = p;
   const lastDataCol = nMc > 0 ? 4 + nMc : 6;
   ws.mergeCells(TITLE_ROW, 1, TITLE_ROW, Math.max(lastDataCol, MC_TALLY_TF_LAST_Q_COL));
   const title = ws.getCell(TITLE_ROW, 1);
   title.value = "MC tally (Ok vs keys on MC+TF)";
   title.font = { bold: true, size: 14 };
+  title.fill = F25_TITLE_FILL;
   title.alignment = { vertical: "middle", horizontal: "center" };
 
   ws.getCell(1, MC_TALLY_MC_PTS_COL).value = "MC pts each";
@@ -467,10 +648,10 @@ function buildMcTallySheet(ws, p) {
 
   ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_MC_PTS_COL).value = 1;
   ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_TF_PTS_COL).value = 1;
-  ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_MC_FIRST_Q_COL).value = nMc > 0 ? 1 : 0;
-  ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_MC_LAST_Q_COL).value = nMc;
-  ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_TF_FIRST_Q_COL).value = 0;
-  ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_TF_LAST_Q_COL).value = 0;
+  ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_MC_FIRST_Q_COL).value = tallyMcFirst;
+  ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_MC_LAST_Q_COL).value = tallyMcLast;
+  ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_TF_FIRST_Q_COL).value = tallyTfFirst;
+  ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_TF_LAST_Q_COL).value = tallyTfLast;
 
   const mL = colIndexToLetters(MC_TALLY_MC_PTS_COL);
   const nL = colIndexToLetters(MC_TALLY_TF_PTS_COL);
@@ -611,18 +792,17 @@ function buildCutoffsSheet(ws) {
   };
 
   const bMinusHint = ws.getCell(6, 6);
-  bMinusHint.value = "Curve target about 5-20% at B- (guidance only).";
+  bMinusHint.value = "Curve target: 5-20% at B-";
   bMinusHint.font = { italic: true, size: 9 };
   bMinusHint.alignment = { wrapText: true, vertical: "top" };
 
   const aHint = ws.getCell(10, 6);
-  aHint.value = "Curve target about 5-30% at A (guidance only).";
+  aHint.value = "Curve target: 5-30% at A";
   aHint.font = { italic: true, size: 9 };
   aHint.alignment = { wrapText: true, vertical: "top" };
 
   const gpaBandHint = ws.getCell(6, 8);
-  gpaBandHint.value =
-    "Typical class GPA band about 3.2-3.4 before participation adj. (guidance only).";
+  gpaBandHint.value = "Curve target: 3.2-3.4 class GPA (pre-participation)";
   gpaBandHint.font = { italic: true, size: 9 };
   gpaBandHint.alignment = { wrapText: true, vertical: "top" };
 
@@ -635,9 +815,7 @@ function buildCutoffsSheet(ws) {
   gpaPartHead.value = "GPA w/ Part";
   gpaPartHead.font = { bold: true };
 
-  for (let c = 2; c <= 5; c++) {
-    ws.getCell(CUTOFFS_PART_POS_VALUE_ROW, c).value = 0;
-  }
+  ws.getCell(CUTOFFS_PART_POS_VALUE_ROW, 2).value = 0;
 
   const sumGpaCountPairs = [];
   for (let r = CUTOFFS_DATA_FIRST_ROW; r <= lastRow; r++) {
@@ -652,8 +830,10 @@ function buildCutoffsSheet(ws) {
   negLab.value = "Participation Adj. Negative";
   negLab.font = { bold: true };
   negLab.alignment = { vertical: "middle", horizontal: "center" };
-  for (let c = 2; c <= 5; c++) {
-    ws.getCell(CUTOFFS_PART_NEG_VALUE_ROW, c).value = 0;
+  ws.getCell(CUTOFFS_PART_NEG_VALUE_ROW, 2).value = 0;
+
+  for (let r = CUTOFFS_DATA_FIRST_ROW; r <= lastRow; r++) {
+    ws.getCell(r, 5).numFmt = "0.00%";
   }
 
   ws.getColumn(1).width = 10;
@@ -677,6 +857,7 @@ function buildTotalSheet(ws, p) {
   const title = ws.getCell(TITLE_ROW, 1);
   title.value = "Totals (MC/TF points and letter grade)";
   title.font = { bold: true, size: 14 };
+  title.fill = F25_TITLE_FILL;
   title.alignment = { vertical: "middle", horizontal: "center" };
 
   ws.getCell(2, 1).value = "Max points (from MCtally inputs)";
@@ -707,7 +888,7 @@ function buildTotalSheet(ws, p) {
   ws.getCell(HEADER_ROW, 3).font = { bold: true };
   ws.getCell(HEADER_ROW, 4).value = "TF pts";
   ws.getCell(HEADER_ROW, 4).font = { bold: true };
-  ws.getCell(HEADER_ROW, 5).value = "Pct (0-1)";
+  ws.getCell(HEADER_ROW, 5).value = "Pct";
   ws.getCell(HEADER_ROW, 5).font = { bold: true };
   ws.getCell(HEADER_ROW, 6).value = "Letter";
   ws.getCell(HEADER_ROW, 6).font = { bold: true };
@@ -722,9 +903,11 @@ function buildTotalSheet(ws, p) {
       ws.getCell(row, 2).value = { formula: `=${tallyQuoted}!A${row}` };
       ws.getCell(row, 3).value = { formula: `=${tallyQuoted}!${mcPtsColL}${row}` };
       ws.getCell(row, 4).value = { formula: `=${tallyQuoted}!${tfPtsColL}${row}` };
-      ws.getCell(row, 5).value = {
+      const pctCell = ws.getCell(row, 5);
+      pctCell.value = {
         formula: `=IF($B$2=0,"",(C${row}+D${row})/$B$2)`,
       };
+      pctCell.numFmt = "0.00%";
       ws.getCell(row, 6).value = {
         formula: `=IF(E${row}="","",VLOOKUP(E${row},cutoffs,2,TRUE))`,
       };

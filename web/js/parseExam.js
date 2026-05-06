@@ -1,11 +1,11 @@
 /**
- * Ports mcparse() from mc_parse.py: line-based extraction of course, anonymous ID,
- * and multiple-choice answers from concatenated exam PDF text.
- * Each MC/TF response is taken as a single character from the exam line (format "n. X");
+ * Line-based extraction of course, anonymous ID, and multiple-choice answers from concatenated
+ * exam PDF text. Each MC/TF response is taken as a single character from the exam line (format "n. X");
  * the Excel workbook may later define multi-letter correct keys in row 2 (e.g. AB) for grading.
  *
  * pdf.js merged text (see pdfText.js) often inserts runs of spaces between words; marker and
- * MC-line matching tolerates that while preserving the same state machine as mc_parse.py.
+ * MC-line matching tolerates that while preserving the same line-state behavior as the original
+ * Python extractor.
  */
 
 /** Collapses runs of whitespace to a single space for canonical marker comparisons. */
@@ -34,7 +34,7 @@ function parseMcAnswerLine(line) {
 }
 
 /**
- * Matches mc_parse second-loop detection of question end (tolerates extra spaces from pdf.js).
+ * Detects end-of-question markers (tolerates extra spaces from pdf.js).
  * @param {string} line processLine output
  */
 function matchesEndOfQuestion(line) {

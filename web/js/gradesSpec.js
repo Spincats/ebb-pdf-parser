@@ -62,11 +62,8 @@ export const MC_TALLY_MC_LAST_Q_COL = 16;
 export const MC_TALLY_TF_FIRST_Q_COL = 17;
 export const MC_TALLY_TF_LAST_Q_COL = 18;
 
-/** Rows between last student row and the first MC per-question summary block */
-export const MC_SUMMARY_GAP_ROWS = 9;
-
-/** Blank rows inserted between stacked per-question summary blocks */
-export const MC_SUMMARY_BLOCK_GAP_ROWS = 1;
+/** Rows between last student row and the MC summary grid (F25 uses a gap of 3: data ends row 37, summary row 41). */
+export const MC_SUMMARY_GAP_ROWS = 3;
 
 /**
  * Row where instructors enter the accepted MC/TF answer key per question column
@@ -83,8 +80,8 @@ export const FIRST_STUDENT_ROW = 4;
 /** Title row (1-based) */
 export const TITLE_ROW = 1;
 
-/** Short-answer trailer column headers (last three columns of SA sheet) */
-export const SA_TRAILER_HEADERS = ["Part O", "Part P", "Part Q"];
+/** Short-answer trailer column headers (last three columns of SA sheet; matches F25 XC / TOTAL / Notes). */
+export const SA_TRAILER_HEADERS = ["XC", "TOTAL", "Notes"];
 
 /** MC+TF trailer column headers (last two columns) */
 export const MC_TRAILER_HEADERS = ["MC notes", "MC adj"];

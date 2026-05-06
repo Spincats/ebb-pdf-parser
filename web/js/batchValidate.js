@@ -1,7 +1,7 @@
 import { computeModalEssayNa, findEssayCountOutliers } from "./essayCountModal.js";
 
 /**
- * Python-compatible course reconciliation (mc_parse.py lines 135-149).
+ * Reconciles course strings across a batch (short code vs dashed term suffix).
  * @param {string} aggregateCourse
  * @param {string} nextCourse
  * @returns {{ ok: true, course: string } | { ok: false, message: string }}

@@ -171,6 +171,37 @@ h1 {
   color: #56d364;
 }
 
+.status.error {
+  color: var(--danger);
+}
+
+.option-hint {
+  margin-bottom: 0.75rem;
+}
+
+.option-grid {
+  display: grid;
+  gap: 0.75rem 1.25rem;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  margin-top: 0.25rem;
+}
+
+.option-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.option-grid input {
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
 footer {
   margin-top: 2rem;
   font-size: 0.8rem;

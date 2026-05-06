@@ -42,13 +42,51 @@
         <ul id="warnList"></ul>
       </section>
 
+      <section id="exportOptionsPanel" class="panel" hidden>
+        <h2>Workbook options</h2>
+        <p class="lead option-hint">
+          Adjust computed values before download. MC and TF ranges use 1-based question numbers (same
+          labels as the MC+TF sheet). They populate MCtally row 2: columns O and P (MC first/last), Q
+          and R (TF first/last). Set TF first and TF last to 0 to disable TF scoring. Ranges must not
+          overlap.
+        </p>
+        <div class="option-grid">
+          <label for="optStudents"
+            >Number of students
+            <input type="number" id="optStudents" min="1" step="1" required />
+          </label>
+          <label for="optNsa"
+            >Short answer / essay columns
+            <input type="number" id="optNsa" min="0" step="1" required />
+          </label>
+          <label for="optMcFirst"
+            >MC first question (1-based)
+            <input type="number" id="optMcFirst" min="0" step="1" required />
+          </label>
+          <label for="optMcLast"
+            >MC last question (1-based)
+            <input type="number" id="optMcLast" min="0" step="1" required />
+          </label>
+          <label for="optTfFirst"
+            >TF first question (0 = off)
+            <input type="number" id="optTfFirst" min="0" step="1" required />
+          </label>
+          <label for="optTfLast"
+            >TF last question
+            <input type="number" id="optTfLast" min="0" step="1" required />
+          </label>
+        </div>
+        <p id="optError" class="status error" hidden></p>
+      </section>
+
       <button type="button" class="btn btn-primary" id="downloadBtn" disabled>
         Download grade workbook
       </button>
       <p id="status" class="status" aria-live="polite"></p>
 
       <footer>
-        Essay question counts use the modal value across PDFs from the line &quot;Number of Essay Questions:&quot; on page 1.
+        Essay question counts use the modal value across PDFs from the line &quot;Number of Essay
+        Questions:&quot; on page 1.
       </footer>
     </main>
 

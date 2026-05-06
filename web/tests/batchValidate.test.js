@@ -3,15 +3,15 @@ import { reconcileCourse, validateBatch } from "../js/batchValidate.js";
 
 describe("reconcileCourse", () => {
   it("adopts first course", () => {
-    expect(reconcileCourse("", "AB")).toEqual({ ok: true, course: "AB" });
+    expect(reconcileCourse("", "ZZ-SEED-100")).toEqual({ ok: true, course: "ZZ-SEED-100" });
   });
 
   it("promotes short to long when dashed extension matches", () => {
-    expect(reconcileCourse("CS", "CS-F25")).toEqual({ ok: true, course: "CS-F25" });
+    expect(reconcileCourse("ZZ", "ZZ-TERM-8801")).toEqual({ ok: true, course: "ZZ-TERM-8801" });
   });
 
   it("rejects incompatible dashed codes", () => {
-    const r = reconcileCourse("CS-FALL", "CS-SPRING");
+    const r = reconcileCourse("ZZ-FALL", "ZZ-SPRING");
     expect(r.ok).toBe(false);
   });
 });
@@ -21,15 +21,15 @@ describe("validateBatch", () => {
     const v = validateBatch([
       {
         fileName: "a.pdf",
-        course: "X",
-        exam_no: "1",
+        course: "ZZ-UNIT-9000",
+        exam_no: "anon-fake-001",
         mc: { 1: "A" },
         essayCount: 2,
       },
       {
         fileName: "b.pdf",
-        course: "X",
-        exam_no: "2",
+        course: "ZZ-UNIT-9000",
+        exam_no: "anon-fake-002",
         mc: { 1: "B" },
         essayCount: 2,
       },
@@ -43,15 +43,15 @@ describe("validateBatch", () => {
     const v = validateBatch([
       {
         fileName: "a.pdf",
-        course: "X",
-        exam_no: "1",
+        course: "ZZ-UNIT-9000",
+        exam_no: "anon-fake-duplicate",
         mc: { 1: "A" },
         essayCount: 1,
       },
       {
         fileName: "b.pdf",
-        course: "X",
-        exam_no: "1",
+        course: "ZZ-UNIT-9000",
+        exam_no: "anon-fake-duplicate",
         mc: { 1: "B" },
         essayCount: 1,
       },

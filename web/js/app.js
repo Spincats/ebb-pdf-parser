@@ -1,6 +1,10 @@
 import { validateBatch } from "./batchValidate.js";
 import { buildGradesWorkbook } from "./buildGradesWorkbook.js";
 import {
+  mcQuestionCountForTally,
+  validateMcTallyQuestionRanges,
+} from "./workbookExport.js";
+import {
   extractEssayQuestionCount,
   parseExamText,
 } from "./parseExam.js";
@@ -17,6 +21,14 @@ const warnPanel = document.getElementById("warnPanel");
 const warnList = document.getElementById("warnList");
 const downloadBtn = document.getElementById("downloadBtn");
 const statusEl = document.getElementById("status");
+const exportOptionsPanel = document.getElementById("exportOptionsPanel");
+const optStudents = document.getElementById("optStudents");
+const optNsa = document.getElementById("optNsa");
+const optMcFirst = document.getElementById("optMcFirst");
+const optMcLast = document.getElementById("optMcLast");
+const optTfFirst = document.getElementById("optTfFirst");
+const optTfLast = document.getElementById("optTfLast");
+const optError = document.getElementById("optError");
 
 /** @type {File[]} */
 let selectedFiles = [];
@@ -49,6 +61,68 @@ function renderFileList() {
     li.textContent = `${f.name} (${Math.round(f.size / 1024)} KB)`;
     fileList.appendChild(li);
   }
+}
+
+function hideExportOptions() {
+  if (exportOptionsPanel) exportOptionsPanel.hidden = true;
+  if (optError) {
+    optError.hidden = true;
+    optError.textContent = "";
+  }
+}
+
+/**
+ * @param {{ exams: Map<string, unknown>, nSa: number | null }} v
+ */
+function showExportOptions(v) {
+  if (!exportOptionsPanel || !optStudents || !optNsa) return;
+  exportOptionsPanel.hidden = false;
+  if (optError) {
+    optError.hidden = true;
+    optError.textContent = "";
+  }
+  optStudents.value = String(v.exams.size);
+  optNsa.value = String(v.nSa ?? 0);
+  const nMc = mcQuestionCountForTally(v.exams);
+  optMcFirst.value = nMc > 0 ? "1" : "0";
+  optMcLast.value = String(Math.max(0, nMc));
+  optTfFirst.value = "0";
+  optTfLast.value = "0";
+}
+
+/**
+ * @param {{ exams: Map<string, unknown> }} v
+ * @returns
+ *   | { error: string }
+ *   | { studentCount: number; nSa: number; tallyMcFirst: number; tallyMcLast: number; tallyTfFirst: number; tallyTfLast: number }
+ */
+function readWorkbookExportOptions(v) {
+  const students = parseInt(optStudents?.value ?? "", 10);
+  const nSa = parseInt(optNsa?.value ?? "", 10);
+  const mcFi = parseInt(optMcFirst?.value ?? "", 10);
+  const mcLa = parseInt(optMcLast?.value ?? "", 10);
+  const tfFi = parseInt(optTfFirst?.value ?? "", 10);
+  const tfLa = parseInt(optTfLast?.value ?? "", 10);
+  if (!Number.isFinite(students) || students < 1) {
+    return { error: "Number of students must be an integer >= 1." };
+  }
+  if (!Number.isFinite(nSa) || nSa < 0) {
+    return { error: "Short answer / essay column count must be an integer >= 0." };
+  }
+  if (![mcFi, mcLa, tfFi, tfLa].every((n) => Number.isFinite(n))) {
+    return { error: "MC and TF range fields must be integers." };
+  }
+  const nMc = mcQuestionCountForTally(v.exams);
+  const terr = validateMcTallyQuestionRanges(nMc, mcFi, mcLa, tfFi, tfLa);
+  if (terr) return { error: terr };
+  return {
+    studentCount: students,
+    nSa,
+    tallyMcFirst: mcFi,
+    tallyMcLast: mcLa,
+    tallyTfFirst: tfFi,
+    tallyTfLast: tfLa,
+  };
 }
 
 function renderMessages(errors, warnings) {
@@ -103,6 +177,7 @@ async function parseAllPdfs(files) {
 async function runPipeline() {
   downloadBtn.disabled = true;
   lastValidation = null;
+  hideExportOptions();
   renderMessages([], []);
 
   if (selectedFiles.length === 0) {
@@ -118,6 +193,7 @@ async function runPipeline() {
     renderMessages(v.errors, v.warnings);
 
     if (v.ok && v.nSa !== null) {
+      showExportOptions(v);
       setStatus(
         `Ready: ${v.exams.size} student(s), ${v.nSa} SA column(s), course "${v.reconciledCourse}".`,
         true
@@ -171,16 +247,51 @@ dropzone.addEventListener("keydown", (e) => {
   }
 });
 
+if (exportOptionsPanel) {
+  for (const el of [
+    optStudents,
+    optNsa,
+    optMcFirst,
+    optMcLast,
+    optTfFirst,
+    optTfLast,
+  ]) {
+    el?.addEventListener("input", () => {
+      if (optError) {
+        optError.hidden = true;
+        optError.textContent = "";
+      }
+    });
+  }
+}
+
 downloadBtn.addEventListener("click", async () => {
   const v = lastValidation;
   if (!v?.ok || v.nSa === null) return;
+  const opts = readWorkbookExportOptions(v);
+  if ("error" in opts) {
+    if (optError) {
+      optError.textContent = opts.error;
+      optError.hidden = false;
+    }
+    return;
+  }
+  if (optError) {
+    optError.hidden = true;
+    optError.textContent = "";
+  }
   setStatus("Building workbook…");
   downloadBtn.disabled = true;
   try {
     const blob = await buildGradesWorkbook({
       reconciledCourse: v.reconciledCourse,
-      nSa: v.nSa,
+      nSa: opts.nSa,
       exams: v.exams,
+      studentCount: opts.studentCount,
+      tallyMcFirst: opts.tallyMcFirst,
+      tallyMcLast: opts.tallyMcLast,
+      tallyTfFirst: opts.tallyTfFirst,
+      tallyTfLast: opts.tallyTfLast,
     });
     const name = `${sanitizeFilename(v.reconciledCourse)}.xlsx`;
     const a = document.createElement("a");

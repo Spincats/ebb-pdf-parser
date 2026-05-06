@@ -63,8 +63,8 @@ Anonymous Number: 1
 
   it("tolerates pdf.js-style extra spaces (Exams 2)", () => {
     const text = `
-Property,   Class   #   1234_X,   with   Y
-Anonymous   Number:   911
+Property,   Class   #   11847_X,   with   Y
+Anonymous   Number:   937
 -->   Multiple   Choice   Answers
 1.   B
 9.   C
@@ -73,8 +73,8 @@ Anonymous   Number:   911
 --->End   Multiple   Choice
 `;
     const r = parseExamText(text);
-    expect(r.course).toBe("1234_X");
-    expect(r.exam_no).toBe("911");
+    expect(r.course).toBe("11847_X");
+    expect(r.exam_no).toBe("937");
     expect(r.mc["1"]).toBe("B");
     expect(r.mc["9"]).toBe("C");
     expect(r.mc["10"]).toBe("D");
