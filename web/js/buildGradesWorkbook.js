@@ -45,19 +45,42 @@ const F25_TITLE_FILL = {
   bgColor: { argb: "FFF3F3F3" },
 };
 
-/**
- * @param {string} qid
- * @returns {string}
- */
-function mcTableColumnName(qid) {
-  return `Q_${String(qid).replace(/[^0-9A-Za-z_]/g, "_")}`;
-}
+const DATA_GRID_BORDER = {
+  top: { style: "thin", color: { argb: "FFB4B4B4" } },
+  left: { style: "thin", color: { argb: "FFB4B4B4" } },
+  bottom: { style: "thin", color: { argb: "FFB4B4B4" } },
+  right: { style: "thin", color: { argb: "FFB4B4B4" } },
+};
+
+const HEADER_BAND_FILL = {
+  type: "pattern",
+  pattern: "solid",
+  fgColor: { argb: "FFD9E1F2" },
+  bgColor: { argb: "FFD9E1F2" },
+};
 
 /**
- * @param {number} i 1-based SA index
+ * Borders and optional header-row styling for a rectangular data block (no Excel ListObject).
+ *
+ * @param {import("exceljs").Worksheet} ws
+ * @param {number} r1
+ * @param {number} c1
+ * @param {number} r2
+ * @param {number} c2
+ * @param {{ headerRow?: number }} [opts] 1-based row number treated as column headers
  */
-function saTableColumnName(i) {
-  return `SA_${i}`;
+function styleDataGrid(ws, r1, c1, r2, c2, opts = {}) {
+  const headerRow = opts.headerRow;
+  for (let r = r1; r <= r2; r++) {
+    for (let c = c1; c <= c2; c++) {
+      const cell = ws.getCell(r, c);
+      cell.border = DATA_GRID_BORDER;
+      if (headerRow !== undefined && r === headerRow) {
+        cell.font = { ...(cell.font ?? {}), bold: true };
+        cell.fill = HEADER_BAND_FILL;
+      }
+    }
+  }
 }
 
 /**
@@ -283,12 +306,15 @@ export async function buildGradesWorkbook(params, ExcelJSMod = null) {
 
   const cutWs = wb.addWorksheet(SHEET_CUTOFFS);
   const totalWs = wb.addWorksheet(SHEET_TOTAL);
+  const saQuoted = quoteSheetNameForFormula(SHEET_SA);
   buildTotalSheet(totalWs, {
     numStudents,
     nMc,
+    nSa,
     lastStudentRow,
     mcQuoted,
     tallyQuoted,
+    saQuoted,
   });
   buildCutoffsSheet(cutWs);
 
@@ -324,29 +350,23 @@ function buildSaSheet(ws, p) {
   ws.getCell(HEADER_ROW, 1).value = "Anonymous ID";
   ws.getCell(HEADER_ROW, 1).font = { bold: true };
 
-  const saCols = [];
-  for (let i = 1; i <= nSa; i++) {
-    saCols.push({ name: saTableColumnName(i) });
-  }
-
-  const saDataRows = studentIds.map(() => saCols.map(() => null));
+  const lastSaScoreCol = nSa > 0 ? 1 + nSa : 1;
+  const lastSaLetter = colIndexToLetters(lastSaScoreCol);
 
   if (nSa > 0) {
-    ws.addTable({
-      name: "tblSA",
-      displayName: "SA_Data",
-      ref: `B${HEADER_ROW}`,
-      headerRow: true,
-      totalsRow: false,
-      style: {
-        theme: "TableStyleMedium2",
-        showFirstColumn: false,
-        showLastColumn: false,
-        showRowStripes: true,
-        showColumnStripes: false,
-      },
-      columns: saCols,
-      rows: saDataRows,
+    for (let i = 1; i <= nSa; i++) {
+      const c = 1 + i;
+      ws.getCell(HEADER_ROW, c).value = String(i);
+      ws.getCell(HEADER_ROW, c).font = { bold: true };
+    }
+    for (let r = 0; r < numStudents; r++) {
+      const row = FIRST_STUDENT_ROW + r;
+      for (let c = 2; c <= lastSaScoreCol; c++) {
+        ws.getCell(row, c).value = null;
+      }
+    }
+    styleDataGrid(ws, HEADER_ROW, 1, lastStudentRow, lastSaScoreCol, {
+      headerRow: HEADER_ROW,
     });
   } else {
     ws.getCell(HEADER_ROW, 2).value = "(no SA columns)";
@@ -371,13 +391,19 @@ function buildSaSheet(ws, p) {
       if (totalCol !== null && colIndex === totalCol && nSa > 0) {
         const totalF =
           nSa === 1
-            ? "=tblSA[[#This Row],[SA_1]]"
-            : `=SUM(tblSA[[#This Row],[SA_1]:[SA_${nSa}]])`;
+            ? `=B${row}`
+            : `=SUM(B${row}:$${lastSaLetter}$${row})`;
         ws.getCell(row, colIndex).value = { formula: totalF };
       } else {
         ws.getCell(row, colIndex).value = null;
       }
     }
+  }
+
+  if (nSa > 0) {
+    styleDataGrid(ws, HEADER_ROW, lastSaScoreCol + 1, lastStudentRow, lastSaCol, {
+      headerRow: HEADER_ROW,
+    });
   }
 
   ws.getColumn(1).width = 18;
@@ -419,29 +445,21 @@ function buildMcSheet(ws, p) {
   ws.getCell(HEADER_ROW, 1).value = "Anonymous ID";
   ws.getCell(HEADER_ROW, 1).font = { bold: true };
 
-  const mcCols = mcKeys.map((qid) => ({ name: mcTableColumnName(qid) }));
-  const mcDataRows = studentIds.map((id) => {
-    const mc = exams.get(id) ?? {};
-    return mcKeys.map((q) => mc[q] ?? "");
-  });
-
   if (nMc > 0) {
-    ws.addTable({
-      name: "tblMC",
-      displayName: "MC_Data",
-      ref: `B${HEADER_ROW}`,
-      headerRow: true,
-      totalsRow: false,
-      style: {
-        theme: "TableStyleMedium9",
-        showFirstColumn: false,
-        showLastColumn: false,
-        showRowStripes: true,
-        showColumnStripes: false,
-      },
-      columns: mcCols,
-      rows: mcDataRows,
-    });
+    for (let qi = 0; qi < mcKeys.length; qi++) {
+      const col = 2 + qi;
+      ws.getCell(HEADER_ROW, col).value = String(mcKeys[qi]);
+      ws.getCell(HEADER_ROW, col).font = { bold: true };
+    }
+    for (let r = 0; r < numStudents; r++) {
+      const row = FIRST_STUDENT_ROW + r;
+      const id = studentIds[r];
+      const mc = exams.get(id) ?? {};
+      for (let qi = 0; qi < mcKeys.length; qi++) {
+        const col = 2 + qi;
+        ws.getCell(row, col).value = mc[mcKeys[qi]] ?? "";
+      }
+    }
   } else {
     ws.getCell(HEADER_ROW, 2).value = "(no MC columns)";
   }
@@ -460,6 +478,10 @@ function buildMcSheet(ws, p) {
       ws.getCell(row, 2 + nMc + tc).value = null;
     }
   }
+
+  styleDataGrid(ws, HEADER_ROW, 1, lastStudentRow, lastMcCol, {
+    headerRow: HEADER_ROW,
+  });
 
   ws.getColumn(1).width = 18;
   for (let i = 2; i <= lastMcCol; i++) {
@@ -521,13 +543,14 @@ function writeMcSummaryGrid(ws, ctx) {
     for (let qi = 0; qi < mcKeys.length; qi++) {
       const qid = mcKeys[qi];
       const col = 2 + qi;
-      const colName = mcTableColumnName(qid);
+      const colL = colIndexToLetters(col);
       const tf = isTfStyleMcColumn(qid, studentIds, exams);
       if (tf && (letter === "C" || letter === "D" || letter === "E")) {
         continue;
       }
       const aCell = `$A$${row}`;
-      const f = `IFERROR(COUNTIF(tblMC[[#Data],[${colName}]],${aCell})/COUNTA(tblMC[[#Data],[${colName}]]),"")`;
+      const dataTop = FIRST_STUDENT_ROW;
+      const f = `IFERROR(COUNTIF($${colL}$${dataTop}:$${colL}$${lastStudentRow},${aCell})/COUNTA($${colL}$${dataTop}:$${colL}$${lastStudentRow}),"")`;
       const cell = ws.getCell(row, col);
       cell.value = { formula: f };
       cell.numFmt = "0.00%";
@@ -631,20 +654,28 @@ function buildMcTallySheet(ws, p) {
     tallyTfFirst,
     tallyTfLast,
   } = p;
-  const lastDataCol = nMc > 0 ? 4 + nMc : 6;
-  ws.mergeCells(TITLE_ROW, 1, TITLE_ROW, Math.max(lastDataCol, MC_TALLY_TF_LAST_Q_COL));
+  ws.mergeCells(TITLE_ROW, 1, TITLE_ROW, 12);
   const title = ws.getCell(TITLE_ROW, 1);
-  title.value = "MC tally (Ok vs keys on MC+TF)";
+  title.value = "Multiple Choice and True-False scoring";
   title.font = { bold: true, size: 14 };
   title.fill = F25_TITLE_FILL;
   title.alignment = { vertical: "middle", horizontal: "center" };
 
-  ws.getCell(1, MC_TALLY_MC_PTS_COL).value = "MC pts each";
-  ws.getCell(1, MC_TALLY_TF_PTS_COL).value = "TF pts each";
-  ws.getCell(1, MC_TALLY_MC_FIRST_Q_COL).value = "MC Q first (1-based)";
-  ws.getCell(1, MC_TALLY_MC_LAST_Q_COL).value = "MC Q last (1-based)";
-  ws.getCell(1, MC_TALLY_TF_FIRST_Q_COL).value = "TF Q first (1-based)";
-  ws.getCell(1, MC_TALLY_TF_LAST_Q_COL).value = "TF Q last (1-based)";
+  const paramLabelStyle = { size: 9, italic: true };
+  const paramLabels = [
+    [MC_TALLY_MC_PTS_COL, "Points per MC question"],
+    [MC_TALLY_TF_PTS_COL, "Points per TF question"],
+    [MC_TALLY_MC_FIRST_Q_COL, "MC block first Q (1-based)"],
+    [MC_TALLY_MC_LAST_Q_COL, "MC block last Q (1-based)"],
+    [MC_TALLY_TF_FIRST_Q_COL, "TF block first Q (1-based)"],
+    [MC_TALLY_TF_LAST_Q_COL, "TF block last Q (1-based)"],
+  ];
+  for (const [col, text] of paramLabels) {
+    const c = ws.getCell(1, col);
+    c.value = text;
+    c.font = paramLabelStyle;
+    c.alignment = { wrapText: true, vertical: "top", horizontal: "center" };
+  }
 
   ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_MC_PTS_COL).value = 1;
   ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_TF_PTS_COL).value = 1;
@@ -668,17 +699,31 @@ function buildMcTallySheet(ws, p) {
     const firstOkL = colIndexToLetters(3);
     const lastOkL = colIndexToLetters(2 + nMc);
 
-    const tallyRows = [];
+    ws.getCell(HEADER_ROW, 1).value = "Total correct";
+    ws.getCell(HEADER_ROW, 1).font = { bold: true };
+    ws.getCell(HEADER_ROW, 2).value = "Anonymous ID";
+    ws.getCell(HEADER_ROW, 2).font = { bold: true };
+    for (let qi = 0; qi < nMc; qi++) {
+      const col = 3 + qi;
+      ws.getCell(HEADER_ROW, col).value = String(mcKeys[qi]);
+      ws.getCell(HEADER_ROW, col).font = { bold: true };
+    }
+    ws.getCell(HEADER_ROW, mcPtsCol).value = "MC pts";
+    ws.getCell(HEADER_ROW, mcPtsCol).font = { bold: true };
+    ws.getCell(HEADER_ROW, tfPtsCol).value = "TF pts";
+    ws.getCell(HEADER_ROW, tfPtsCol).font = { bold: true };
+
     for (let r = 0; r < numStudents; r++) {
       const row = FIRST_STUDENT_ROW + r;
       const totalF = `=SUMPRODUCT(0+(${firstOkL}${row}:${lastOkL}${row}))`;
       const idF = `=${mcQuoted}!A${row}`;
-      const okCells = [];
+      ws.getCell(row, 1).value = { formula: totalF };
+      ws.getCell(row, 2).value = { formula: idF };
       for (let qi = 0; qi < nMc; qi++) {
         const mcCol = 2 + qi;
-        okCells.push({
+        ws.getCell(row, 3 + qi).value = {
           formula: buildMcKeyMatchFormulaForSheet(`${mcQuoted}!`, mcCol, row),
-        });
+        };
       }
       const mcPtsF =
         `=$${mL}$${ir}*IF(OR($${oL}$${ir}<1,$${pL}$${ir}<$${oL}$${ir},$${oL}$${ir}>${nMc},$${pL}$${ir}>${nMc}),0,` +
@@ -686,41 +731,15 @@ function buildMcTallySheet(ws, p) {
       const tfPtsF =
         `=$${nL}$${ir}*IF(OR($${qL}$${ir}=0,$${rL}$${ir}<$${qL}$${ir},$${qL}$${ir}>${nMc},$${rL}$${ir}>${nMc}),0,` +
         `SUMPRODUCT(0+(OFFSET($A${row},0,(1+$${qL}$${ir}),1,$${rL}$${ir}-$${qL}$${ir}+1))))`;
-
-      tallyRows.push([
-        { formula: totalF },
-        { formula: idF },
-        ...okCells,
-        { formula: mcPtsF },
-        { formula: tfPtsF },
-      ]);
+      ws.getCell(row, mcPtsCol).value = { formula: mcPtsF };
+      ws.getCell(row, tfPtsCol).value = { formula: tfPtsF };
     }
 
     const lastColL = colIndexToLetters(tfPtsCol);
-    ws.addTable({
-      name: "tblTally",
-      displayName: "MC_Tally_Data",
-      ref: `A${HEADER_ROW}:${lastColL}${lastStudentRow}`,
-      headerRow: true,
-      totalsRow: false,
-      style: {
-        theme: "TableStyleMedium9",
-        showFirstColumn: false,
-        showLastColumn: false,
-        showRowStripes: true,
-        showColumnStripes: false,
-      },
-      columns: [
-        { name: "Total_correct" },
-        { name: "Anonymous_ID" },
-        ...mcKeys.map((qid) => ({
-          name: `Ok_Q_${String(qid).replace(/[^0-9A-Za-z_]/g, "_")}`,
-        })),
-        { name: "MC_pts" },
-        { name: "TF_pts" },
-      ],
-      rows: tallyRows,
+    styleDataGrid(ws, HEADER_ROW, 1, lastStudentRow, tfPtsCol, {
+      headerRow: HEADER_ROW,
     });
+    ws.getRow(1).height = 36;
   } else {
     ws.getCell(HEADER_ROW, 3).value = "(no MC questions)";
     ws.getCell(FIRST_STUDENT_ROW, 1).value =
@@ -746,39 +765,28 @@ function buildMcTallySheet(ws, p) {
 function buildCutoffsSheet(ws) {
   const lastRow = CUTOFFS_DATA_LAST_ROW;
   const totalNRow = CUTOFFS_TOTAL_N_VALUE_ROW;
-  const rows = F25_GRADE_CUTOFF_ROWS.map(([minV, letter, gpa], i) => {
-    const row = CUTOFFS_DATA_FIRST_ROW + i;
-    return [
-      minV,
-      letter,
-      gpa,
-      { formula: `=COUNTIF(letters,B${row})` },
-      { formula: `=D${row}/$B$${totalNRow}` },
-    ];
-  });
+  const headerR = CUTOFFS_HEADER_ROW;
+  ws.getCell(headerR, 1).value = "Cutoff";
+  ws.getCell(headerR, 2).value = "Grade";
+  ws.getCell(headerR, 3).value = "GPA";
+  ws.getCell(headerR, 4).value = "Count";
+  ws.getCell(headerR, 5).value = "Pct";
+  for (let c = 1; c <= 5; c++) {
+    ws.getCell(headerR, c).font = { bold: true };
+  }
 
-  ws.addTable({
-    name: "tblCutoffs",
-    displayName: "Cutoff_Bands",
-    ref: `A${CUTOFFS_HEADER_ROW}:E${lastRow}`,
-    headerRow: true,
-    totalsRow: false,
-    style: {
-      theme: "TableStyleMedium2",
-      showFirstColumn: false,
-      showLastColumn: false,
-      showRowStripes: true,
-      showColumnStripes: false,
-    },
-    columns: [
-      { name: "Value" },
-      { name: "Grade" },
-      { name: "GPA" },
-      { name: "Count" },
-      { name: "Pct" },
-    ],
-    rows,
-  });
+  for (let i = 0; i < F25_GRADE_CUTOFF_ROWS.length; i++) {
+    const [minV, letter, gpa] = F25_GRADE_CUTOFF_ROWS[i];
+    const row = CUTOFFS_DATA_FIRST_ROW + i;
+    ws.getCell(row, 1).value = minV;
+    ws.getCell(row, 1).numFmt = "0.00%";
+    ws.getCell(row, 2).value = letter;
+    ws.getCell(row, 3).value = gpa;
+    ws.getCell(row, 4).value = { formula: `=COUNTIF(letters,B${row})` };
+    ws.getCell(row, 5).value = { formula: `=D${row}/$B$${totalNRow}` };
+  }
+
+  styleDataGrid(ws, headerR, 1, lastRow, 5, { headerRow: headerR });
 
   ws.getCell(CUTOFFS_TOTAL_N_LABEL_ROW, 2).value = "Total N";
   ws.getCell(CUTOFFS_TOTAL_N_LABEL_ROW, 2).font = { bold: true };
@@ -847,21 +855,24 @@ function buildCutoffsSheet(ws) {
 }
 
 /**
- * Total: one row per student with IDs from MC+TF, tallies from MCtally, percent of max points, letter from Cutoffs.
+ * Total: one row per student with IDs from MC+TF, tallies from MCtally, SA total from SA sheet,
+ * combined fraction of max (MC+TF + SA), letter from Cutoffs, and a SPARKLINE on combined %.
  * @param {import("exceljs").Worksheet} ws
  */
 function buildTotalSheet(ws, p) {
-  const { numStudents, nMc, lastStudentRow, mcQuoted, tallyQuoted } = p;
-  const lastCol = 6;
+  const { numStudents, nMc, nSa, lastStudentRow, mcQuoted, tallyQuoted, saQuoted } = p;
+  const lastCol = 8;
   ws.mergeCells(TITLE_ROW, 1, TITLE_ROW, lastCol);
   const title = ws.getCell(TITLE_ROW, 1);
-  title.value = "Totals (MC/TF points and letter grade)";
+  title.value = "Totals (MC, TF, SA, combined percent, letter grade)";
   title.font = { bold: true, size: 14 };
   title.fill = F25_TITLE_FILL;
   title.alignment = { vertical: "middle", horizontal: "center" };
 
-  ws.getCell(2, 1).value = "Max points (from MCtally inputs)";
+  ws.getCell(2, 1).value = "Max MC+TF pts (from MCtally)";
   ws.getCell(2, 1).font = { italic: true, size: 10 };
+  ws.getCell(2, 3).value = "Max SA pts";
+  ws.getCell(2, 3).font = { italic: true, size: 10 };
   const tq = tallyQuoted;
   const mLc = colIndexToLetters(MC_TALLY_MC_PTS_COL);
   const nLc = colIndexToLetters(MC_TALLY_TF_PTS_COL);
@@ -879,6 +890,7 @@ function buildTotalSheet(ws, p) {
     `${tq}!$${qLc}$${MC_TALLY_INPUT_ROW}>${nMc},${tq}!$${rLc}$${MC_TALLY_INPUT_ROW}>${nMc}),0,` +
     `${tq}!$${rLc}$${MC_TALLY_INPUT_ROW}-${tq}!$${qLc}$${MC_TALLY_INPUT_ROW}+1)`;
   ws.getCell(2, 2).value = { formula: maxPtsF };
+  ws.getCell(2, 4).value = nSa > 0 ? 150 : 0;
 
   ws.getCell(HEADER_ROW, 1).value = "Anonymous ID";
   ws.getCell(HEADER_ROW, 1).font = { bold: true };
@@ -888,13 +900,20 @@ function buildTotalSheet(ws, p) {
   ws.getCell(HEADER_ROW, 3).font = { bold: true };
   ws.getCell(HEADER_ROW, 4).value = "TF pts";
   ws.getCell(HEADER_ROW, 4).font = { bold: true };
-  ws.getCell(HEADER_ROW, 5).value = "Pct";
+  ws.getCell(HEADER_ROW, 5).value = "SA total";
   ws.getCell(HEADER_ROW, 5).font = { bold: true };
-  ws.getCell(HEADER_ROW, 6).value = "Letter";
+  ws.getCell(HEADER_ROW, 6).value = "Overall pct";
   ws.getCell(HEADER_ROW, 6).font = { bold: true };
+  ws.getCell(HEADER_ROW, 7).value = "Letter";
+  ws.getCell(HEADER_ROW, 7).font = { bold: true };
 
   const mcPtsColL = nMc > 0 ? colIndexToLetters(3 + nMc) : "C";
   const tfPtsColL = nMc > 0 ? colIndexToLetters(4 + nMc) : "D";
+  const totalIdx = SA_TRAILER_HEADERS.indexOf("TOTAL");
+  const saTotalColL =
+    nSa > 0 && totalIdx >= 0
+      ? colIndexToLetters(2 + nSa + totalIdx)
+      : null;
 
   for (let r = 0; r < numStudents; r++) {
     const row = FIRST_STUDENT_ROW + r;
@@ -903,26 +922,54 @@ function buildTotalSheet(ws, p) {
       ws.getCell(row, 2).value = { formula: `=${tallyQuoted}!A${row}` };
       ws.getCell(row, 3).value = { formula: `=${tallyQuoted}!${mcPtsColL}${row}` };
       ws.getCell(row, 4).value = { formula: `=${tallyQuoted}!${tfPtsColL}${row}` };
-      const pctCell = ws.getCell(row, 5);
-      pctCell.value = {
-        formula: `=IF($B$2=0,"",(C${row}+D${row})/$B$2)`,
-      };
-      pctCell.numFmt = "0.00%";
-      ws.getCell(row, 6).value = {
-        formula: `=IF(E${row}="","",VLOOKUP(E${row},cutoffs,2,TRUE))`,
-      };
     } else {
       ws.getCell(row, 2).value = 0;
       ws.getCell(row, 3).value = 0;
       ws.getCell(row, 4).value = 0;
-      ws.getCell(row, 5).value = "";
-      ws.getCell(row, 6).value = "";
     }
+    if (nSa > 0 && saTotalColL) {
+      ws.getCell(row, 5).value = {
+        formula: `=${saQuoted}!${saTotalColL}${row}`,
+      };
+    } else {
+      ws.getCell(row, 5).value = "";
+    }
+    const pctCell = ws.getCell(row, 6);
+    pctCell.value = {
+      formula: `=IF($B$2+$D$2=0,"",(C${row}+D${row}+IF(E${row}="",0,E${row}))/($B$2+$D$2))`,
+    };
+    pctCell.numFmt = "0.00%";
+    ws.getCell(row, 7).value = {
+      formula: `=IF(F${row}="","",VLOOKUP(F${row},cutoffs,2,TRUE))`,
+    };
   }
+
+  const sparkMergeR1 = 2;
+  const sparkMergeR2 = 6;
+  ws.mergeCells(sparkMergeR1, lastCol, sparkMergeR2, lastCol);
+  const sparkCell = ws.getCell(sparkMergeR1, lastCol);
+  sparkCell.alignment = { wrapText: true, vertical: "top", horizontal: "center" };
+  if (numStudents > 0) {
+    const f1 = FIRST_STUDENT_ROW;
+    const fL = colIndexToLetters(6);
+    sparkCell.value = {
+      formula: `=IF(COUNT(${fL}$${f1}:${fL}$${lastStudentRow})=0,"",SPARKLINE(${fL}$${f1}:${fL}$${lastStudentRow},{"charttype","line"}))`,
+    };
+  } else {
+    sparkCell.value = "";
+  }
+  ws.getCell(sparkMergeR1, lastCol - 1).value = "Overall % (curve)";
+  ws.getCell(sparkMergeR1, lastCol - 1).font = { italic: true, size: 9 };
+  ws.getCell(sparkMergeR1, lastCol - 1).alignment = {
+    vertical: "top",
+    horizontal: "right",
+    wrapText: true,
+  };
 
   ws.getColumn(1).width = 16;
   ws.getColumn(2).width = 14;
-  for (let c = 3; c <= 6; c++) {
+  for (let c = 3; c <= 7; c++) {
     ws.getColumn(c).width = 12;
   }
+  ws.getColumn(8).width = 14;
 }

@@ -60,7 +60,7 @@ describe("buildMcKeyMatchFormula", () => {
 });
 
 describe("buildGradesWorkbook", () => {
-  it("writes MC table and F25-style horizontal summary (COUNTIF/COUNTA proportions)", async () => {
+  it("writes MC grid and F25-style horizontal summary (COUNTIF/COUNTA over plain ranges)", async () => {
     const exams = new Map([
       ["anon-fake-010", { 1: "A", 2: "B" }],
       ["anon-fake-020", { 1: "A", 2: "A" }],
@@ -94,12 +94,18 @@ describe("buildGradesWorkbook", () => {
     ).toBe(true);
     expect(String(pctAq1.value.formula)).toContain("COUNTIF");
     expect(String(pctAq1.value.formula)).toContain("COUNTA");
-    expect(String(pctAq1.value.formula)).toContain("tblMC");
+    expect(String(pctAq1.value.formula)).toContain("$B$" + FIRST_STUDENT_ROW);
     expect(String(pctAq1.value.formula)).toContain("$A$" + rowA);
 
     const pctBq2 = mc.getCell(rowB, 3);
     expect(String(pctBq2.value.formula)).toContain("COUNTIF");
     expect(String(pctBq2.value.formula)).toContain("$A$" + rowB);
+
+    const tot = wb.getWorksheet("Total");
+    expect(tot).toBeTruthy();
+    const saRef = tot.getCell(FIRST_STUDENT_ROW, 5).value;
+    expect(saRef && typeof saRef === "object" && "formula" in saRef).toBe(true);
+    expect(String(saRef.formula)).toContain("'ShortAnswer+Essay'!");
   });
 
   it("includes E row formulas when five-option answers appear", async () => {
@@ -152,7 +158,7 @@ describe("buildGradesWorkbook", () => {
     expect(mc.getCell(rowC, 2).value).toBeNull();
   });
 
-  it("does not put instructional text on SA row 2 and writes TOTAL as SUM over tblSA", async () => {
+  it("does not put instructional text on SA row 2 and writes TOTAL as SUM over SA score columns", async () => {
     const exams = new Map([["anon-fake-001", { 1: "A" }]]);
     const blob = await buildGradesWorkbook(
       { reconciledCourse: "ZZ-UNIT-9104", nSa: 3, exams },
@@ -169,7 +175,8 @@ describe("buildGradesWorkbook", () => {
     const totalCol = 2 + 3 + SA_TRAILER_HEADERS.indexOf("TOTAL");
     const totalF = sa.getCell(FIRST_STUDENT_ROW, totalCol).value;
     expect(totalF && typeof totalF === "object" && "formula" in totalF).toBe(true);
-    expect(String(totalF.formula)).toContain("SUM(tblSA");
+    expect(String(totalF.formula)).toMatch(/=SUM\(B4:/);
+    expect(String(totalF.formula)).not.toContain("tblSA");
   });
 
   it("adds MC conditional formatting including colorScale on summary proportions", async () => {
@@ -216,7 +223,9 @@ describe("buildGradesWorkbook", () => {
 
     const cut = wb.getWorksheet("Cutoffs");
     expect(cut).toBeTruthy();
+    expect(cut.getCell(1, 1).value).toBe("Cutoff");
     expect(cut.getCell(2, 1).value).toBe(0);
+    expect(cut.getCell(2, 1).numFmt).toBe("0.00%");
     expect(cut.getCell(2, 2).value).toBe("F");
     expect(cut.getCell(2, 3).value).toBe(0);
     expect(cut.getCell(5, 2).value).toBe("C+");
@@ -240,7 +249,7 @@ describe("buildGradesWorkbook", () => {
     const names = wb.definedNames.model ?? [];
     const lettersName = names.find((d) => d.name === "letters");
     expect(lettersName).toBeTruthy();
-    expect(lettersName.ranges[0]).toMatch(/Total!\$/);
+    expect(lettersName.ranges[0]).toMatch(/Total!\$G\$/);
 
     const cutoffsName = names.find((d) => d.name === "cutoffs");
     expect(cutoffsName).toBeTruthy();
@@ -262,13 +271,24 @@ describe("buildGradesWorkbook", () => {
     expect(maxPts && typeof maxPts === "object" && "formula" in maxPts).toBe(true);
     expect(String(maxPts.formula)).toContain("'MCtally'");
 
-    const letterCell = tot.getCell(4, 6).value;
+    expect(tot.getCell(4, 5).value === "" || tot.getCell(4, 5).value == null).toBe(true);
+
+    const pctCell = tot.getCell(4, 6).value;
+    expect(pctCell && typeof pctCell === "object" && "formula" in pctCell).toBe(true);
+    expect(String(pctCell.formula)).toContain("$B$2+$D$2");
+
+    const letterCell = tot.getCell(4, 7).value;
     expect(letterCell && typeof letterCell === "object" && "formula" in letterCell).toBe(true);
     expect(String(letterCell.formula)).toContain("VLOOKUP");
     expect(String(letterCell.formula)).toContain("cutoffs");
+
+    const spark = tot.getCell(2, 8).value;
+    expect(spark && typeof spark === "object" && "formula" in spark).toBe(true);
+    expect(String(spark.formula)).toContain("SPARKLINE");
+    expect(String(spark.formula)).toMatch(/\$?F\$4/);
   });
 
-  it("sizes tblTally and tblCutoffs to student and band counts", async () => {
+  it("uses plain grids for MCtally and Cutoffs (no ListObject tables)", async () => {
     const exams = new Map([
       ["anon-fake-001", { 1: "A", 2: "B" }],
       ["anon-fake-002", { 1: "B", 2: "A" }],
@@ -282,16 +302,13 @@ describe("buildGradesWorkbook", () => {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buf);
     const tally = wb.getWorksheet("MCtally");
-    const tblTally = tally.getTables().find((t) => t.name === "tblTally");
-    expect(tblTally).toBeTruthy();
-    const tallyRef = tblTally.ref ?? tblTally.model?.tableRef;
-    expect(tallyRef).toBe("A3:F6");
+    expect(tally.getTables().length).toBe(0);
+    expect(tally.getCell(3, 1).value).toBe("Total correct");
+    expect(tally.getCell(3, 3).value).toBe("1");
 
     const cut = wb.getWorksheet("Cutoffs");
-    const tblCut = cut.getTables().find((t) => t.name === "tblCutoffs");
-    expect(tblCut).toBeTruthy();
-    const cutRef = tblCut.ref ?? tblCut.model?.tableRef;
-    expect(cutRef).toBe("A1:E10");
+    expect(cut.getTables().length).toBe(0);
+    expect(cut.getCell(1, 1).value).toBe("Cutoff");
   });
 
   it("stores MC/TF question index overrides on MCtally input row (columns O-R)", async () => {

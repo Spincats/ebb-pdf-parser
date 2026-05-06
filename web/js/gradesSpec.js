@@ -1,6 +1,6 @@
 /**
  * Layout and copy derived from the F25-style gradebook (encoded in source; no template XLSX at runtime).
- * Excel 365+ dynamic arrays / LET are not required; formulas use SUM, AVERAGE, STDEV.S, COUNT, COUNTBLANK, structured table refs.
+ * Excel 365+ dynamic arrays / LET are not required; formulas use SUM, COUNT, COUNTIF, VLOOKUP, and plain A1 ranges for Calc/Sheets compatibility.
  */
 
 export const SHEET_SA = "ShortAnswer+Essay";
@@ -33,8 +33,9 @@ export const CUTOFFS_GPA_WITH_PART_COL = 7;
 
 /**
  * Total sheet column (1-based) where final letter grades are written; workbook name `letters` uses this column.
+ * Columns: A ID, B total correct, C MC pts, D TF pts, E SA total, F overall pct, G letter.
  */
-export const TOTAL_LETTER_COL = 6;
+export const TOTAL_LETTER_COL = 7;
 
 /**
  * [minFraction, letterGrade, gpa] — literals from F25 Grades.xlsx Cutoffs (ascending min for VLOOKUP).
@@ -83,5 +84,5 @@ export const TITLE_ROW = 1;
 /** Short-answer trailer column headers (last three columns of SA sheet; matches F25 XC / TOTAL / Notes). */
 export const SA_TRAILER_HEADERS = ["XC", "TOTAL", "Notes"];
 
-/** MC+TF trailer column headers (last two columns) */
-export const MC_TRAILER_HEADERS = ["MC notes", "MC adj"];
+/** MC+TF trailer column headers (last two columns): adjustments first, then notes. */
+export const MC_TRAILER_HEADERS = ["Adjustments", "MC notes"];
