@@ -19,18 +19,19 @@ import {
   HEADER_ROW,
   MC_ANSWER_KEY_ROW,
   MC_SUMMARY_GAP_ROWS,
-  MC_TALLY_INPUT_ROW,
-  MC_TALLY_MC_FIRST_Q_COL,
-  MC_TALLY_MC_LAST_Q_COL,
-  MC_TALLY_MC_PTS_COL,
-  MC_TALLY_TF_FIRST_Q_COL,
-  MC_TALLY_TF_LAST_Q_COL,
-  MC_TALLY_TF_PTS_COL,
+  MC_CONFIG_INPUT_ROW,
+  MC_CONFIG_MC_FIRST_Q_COL,
+  MC_CONFIG_MC_LAST_Q_COL,
+  MC_CONFIG_MC_PTS_COL,
+  MC_CONFIG_TF_FIRST_Q_COL,
+  MC_CONFIG_TF_LAST_Q_COL,
+  MC_CONFIG_TF_PTS_COL,
   MC_TRAILER_HEADERS,
   SA_TRAILER_HEADERS,
   SHEET_CUTOFFS,
   SHEET_MC,
   SHEET_MC_TALLY,
+  SHEET_MC_TF_CONFIG,
   SHEET_SA,
   SHEET_TOTAL,
   TITLE_ROW,
@@ -173,8 +174,7 @@ export function buildMcKeyMatchFormulaForSheet(sheetPrefix, mcCol1Based, student
   const ansRef = `${sheetPrefix}${colL}${studentRow}`;
   return (
     `IF(OR(LEN(TRIM(${keyRef}))=0,LEN(TRIM(${ansRef}))=0),FALSE,` +
-    `SUMPRODUCT(--((MID(UPPER(TRIM(${keyRef})),ROW(INDIRECT("1:"&LEN(TRIM(${keyRef})))),1)=` +
-    `UPPER(LEFT(TRIM(${ansRef}),1))))>0)`
+    `ISNUMBER(SEARCH(LEFT(TRIM(${ansRef}),1),${keyRef})))`
   );
 }
 
@@ -288,6 +288,8 @@ export async function buildGradesWorkbook(params, ExcelJSMod = null) {
 
   const mcQuoted = quoteSheetNameForFormula(SHEET_MC);
   const tallyQuoted = quoteSheetNameForFormula(SHEET_MC_TALLY);
+  const configQuoted = quoteSheetNameForFormula(SHEET_MC_TF_CONFIG);
+
   const tallyWs = wb.addWorksheet(SHEET_MC_TALLY, {
     views: [{ state: "frozen", ySplit: HEADER_ROW }],
   });
@@ -298,6 +300,16 @@ export async function buildGradesWorkbook(params, ExcelJSMod = null) {
     numStudents,
     lastStudentRow,
     mcQuoted,
+    configQuoted,
+    tallyMcFirst,
+    tallyMcLast,
+    tallyTfFirst,
+    tallyTfLast,
+  });
+
+  const configWs = wb.addWorksheet(SHEET_MC_TF_CONFIG);
+  buildMcTfConfigSheet(configWs, {
+    nMc,
     tallyMcFirst,
     tallyMcLast,
     tallyTfFirst,
@@ -314,6 +326,7 @@ export async function buildGradesWorkbook(params, ExcelJSMod = null) {
     mcQuoted,
     tallyQuoted,
     saQuoted,
+    configQuoted,
   });
   buildCutoffsSheet(cutWs);
 
@@ -571,8 +584,8 @@ function applyMcConditionalFormatting(ws, ctx) {
   const colB = colIndexToLetters(2);
   const lastAnsL = colIndexToLetters(1 + nMc);
   const refAns = `${colB}${fr}:${lastAnsL}${lastStudentRow}`;
-  const correctF = `AND(LEN(TRIM(${colB}${fr}))>0,NOT(ISERROR(SEARCH(UPPER(LEFT(TRIM(${colB}${fr}),1)),UPPER(${colB}$${kr})))))`;
-  const wrongF = `AND(LEN(TRIM(${colB}${fr}))>0,ISERROR(SEARCH(UPPER(LEFT(TRIM(${colB}${fr}),1)),UPPER(${colB}$${kr}))))`;
+  const correctF = `AND(LEN(TRIM(${colB}${fr}))>0,ISNUMBER(SEARCH(LEFT(TRIM(${colB}${fr}),1),${colB}$${kr})))`;
+  const wrongF = `AND(LEN(TRIM(${colB}${fr}))>0,ISERROR(SEARCH(LEFT(TRIM(${colB}${fr}),1),${colB}$${kr})))`;
 
   ws.addConditionalFormatting({
     ref: refAns,
@@ -652,44 +665,23 @@ function buildMcTallySheet(ws, p) {
     tallyMcLast,
     tallyTfFirst,
     tallyTfLast,
+    configQuoted,
   } = p;
-  ws.mergeCells(TITLE_ROW, 1, TITLE_ROW, 12);
+
+  ws.mergeCells(TITLE_ROW, 1, TITLE_ROW, 2 + Math.max(nMc, 2));
   const title = ws.getCell(TITLE_ROW, 1);
   title.value = "Multiple Choice and True-False scoring";
   title.font = { bold: true, size: 14 };
   title.fill = F25_TITLE_FILL;
   title.alignment = { vertical: "middle", horizontal: "center" };
 
-  const paramLabelStyle = { size: 9, italic: true };
-  const paramLabels = [
-    [MC_TALLY_MC_PTS_COL, "Points per MC question"],
-    [MC_TALLY_TF_PTS_COL, "Points per TF question"],
-    [MC_TALLY_MC_FIRST_Q_COL, "MC block first Q (1-based)"],
-    [MC_TALLY_MC_LAST_Q_COL, "MC block last Q (1-based)"],
-    [MC_TALLY_TF_FIRST_Q_COL, "TF block first Q (1-based)"],
-    [MC_TALLY_TF_LAST_Q_COL, "TF block last Q (1-based)"],
-  ];
-  for (const [col, text] of paramLabels) {
-    const c = ws.getCell(1, col);
-    c.value = text;
-    c.font = paramLabelStyle;
-    c.alignment = { wrapText: true, vertical: "top", horizontal: "center" };
-  }
-
-  ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_MC_PTS_COL).value = 1;
-  ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_TF_PTS_COL).value = 1;
-  ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_MC_FIRST_Q_COL).value = tallyMcFirst;
-  ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_MC_LAST_Q_COL).value = tallyMcLast;
-  ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_TF_FIRST_Q_COL).value = tallyTfFirst;
-  ws.getCell(MC_TALLY_INPUT_ROW, MC_TALLY_TF_LAST_Q_COL).value = tallyTfLast;
-
-  const mL = colIndexToLetters(MC_TALLY_MC_PTS_COL);
-  const nL = colIndexToLetters(MC_TALLY_TF_PTS_COL);
-  const oL = colIndexToLetters(MC_TALLY_MC_FIRST_Q_COL);
-  const pL = colIndexToLetters(MC_TALLY_MC_LAST_Q_COL);
-  const qL = colIndexToLetters(MC_TALLY_TF_FIRST_Q_COL);
-  const rL = colIndexToLetters(MC_TALLY_TF_LAST_Q_COL);
-  const ir = MC_TALLY_INPUT_ROW;
+  const ir = MC_CONFIG_INPUT_ROW;
+  const mL = `${configQuoted}!$${colIndexToLetters(MC_CONFIG_MC_PTS_COL)}$${ir}`;
+  const nL = `${configQuoted}!$${colIndexToLetters(MC_CONFIG_TF_PTS_COL)}$${ir}`;
+  const oL = `${configQuoted}!$${colIndexToLetters(MC_CONFIG_MC_FIRST_Q_COL)}$${ir}`;
+  const pL = `${configQuoted}!$${colIndexToLetters(MC_CONFIG_MC_LAST_Q_COL)}$${ir}`;
+  const qL = `${configQuoted}!$${colIndexToLetters(MC_CONFIG_TF_FIRST_Q_COL)}$${ir}`;
+  const rL = `${configQuoted}!$${colIndexToLetters(MC_CONFIG_TF_LAST_Q_COL)}$${ir}`;
 
   if (nMc > 0) {
     const mcPtsCol = 3 + nMc;
@@ -725,11 +717,11 @@ function buildMcTallySheet(ws, p) {
         };
       }
       const mcPtsF =
-        `=$${mL}$${ir}*IF(OR($${oL}$${ir}<1,$${pL}$${ir}<$${oL}$${ir},$${oL}$${ir}>${nMc},$${pL}$${ir}>${nMc}),0,` +
-        `SUMPRODUCT(0+(OFFSET($A${row},0,(1+$${oL}$${ir}),1,$${pL}$${ir}-$${oL}$${ir}+1))))`;
+        `=${mL}*IF(OR(${oL}<1,${pL}<${oL},${oL}>${nMc},${pL}>${nMc}),0,` +
+        `SUMPRODUCT(0+(OFFSET($A${row},0,(1+${oL}),1,${pL}-${oL}+1))))`;
       const tfPtsF =
-        `=$${nL}$${ir}*IF(OR($${qL}$${ir}=0,$${rL}$${ir}<$${qL}$${ir},$${qL}$${ir}>${nMc},$${rL}$${ir}>${nMc}),0,` +
-        `SUMPRODUCT(0+(OFFSET($A${row},0,(1+$${qL}$${ir}),1,$${rL}$${ir}-$${qL}$${ir}+1))))`;
+        `=${nL}*IF(OR(${qL}=0,${rL}<${qL},${qL}>${nMc},${rL}>${nMc}),0,` +
+        `SUMPRODUCT(0+(OFFSET($A${row},0,(1+${qL}),1,${rL}-${qL}+1))))`;
       ws.getCell(row, mcPtsCol).value = { formula: mcPtsF };
       ws.getCell(row, tfPtsCol).value = { formula: tfPtsF };
     }
@@ -753,6 +745,43 @@ function buildMcTallySheet(ws, p) {
   if (nMc > 0) {
     ws.getColumn(3 + nMc).width = 10;
     ws.getColumn(4 + nMc).width = 10;
+  }
+}
+
+/**
+ * @param {import("exceljs").Worksheet} ws
+ */
+function buildMcTfConfigSheet(ws, p) {
+  const { nMc, tallyMcFirst, tallyMcLast, tallyTfFirst, tallyTfLast } = p;
+
+  const paramLabelStyle = { size: 9, italic: true };
+  const paramLabels = [
+    [MC_CONFIG_MC_PTS_COL, "Points per MC question"],
+    [MC_CONFIG_TF_PTS_COL, "Points per TF question"],
+    [MC_CONFIG_MC_FIRST_Q_COL, "MC block first Q (1-based)"],
+    [MC_CONFIG_MC_LAST_Q_COL, "MC block last Q (1-based)"],
+    [MC_CONFIG_TF_FIRST_Q_COL, "TF block first Q (1-based)"],
+    [MC_CONFIG_TF_LAST_Q_COL, "TF block last Q (1-based)"],
+  ];
+
+  for (const [col, text] of paramLabels) {
+    const c = ws.getCell(1, col);
+    c.value = text;
+    c.font = paramLabelStyle;
+    c.alignment = { wrapText: true, vertical: "top", horizontal: "center" };
+  }
+
+  const ir = MC_CONFIG_INPUT_ROW;
+  ws.getCell(ir, MC_CONFIG_MC_PTS_COL).value = 1;
+  ws.getCell(ir, MC_CONFIG_TF_PTS_COL).value = 1;
+  ws.getCell(ir, MC_CONFIG_MC_FIRST_Q_COL).value = tallyMcFirst;
+  ws.getCell(ir, MC_CONFIG_MC_LAST_Q_COL).value = tallyMcLast;
+  ws.getCell(ir, MC_CONFIG_TF_FIRST_Q_COL).value = tallyTfFirst;
+  ws.getCell(ir, MC_CONFIG_TF_LAST_Q_COL).value = tallyTfLast;
+
+  ws.getRow(1).height = 36;
+  for (let i = 1; i <= 6; i++) {
+    ws.getColumn(i).width = 12;
   }
 }
 
@@ -859,7 +888,7 @@ function buildCutoffsSheet(ws) {
  * @param {import("exceljs").Worksheet} ws
  */
 function buildTotalSheet(ws, p) {
-  const { numStudents, nMc, nSa, mcQuoted, tallyQuoted, saQuoted } = p;
+  const { numStudents, nMc, nSa, mcQuoted, tallyQuoted, saQuoted, configQuoted } = p;
   const lastCol = 6;
   ws.mergeCells(TITLE_ROW, 1, TITLE_ROW, lastCol);
   const title = ws.getCell(TITLE_ROW, 1);
@@ -872,22 +901,21 @@ function buildTotalSheet(ws, p) {
   ws.getCell(2, 1).font = { italic: true, size: 10 };
   ws.getCell(2, 3).value = "Max SA pts";
   ws.getCell(2, 3).font = { italic: true, size: 10 };
-  const tq = tallyQuoted;
-  const mLc = colIndexToLetters(MC_TALLY_MC_PTS_COL);
-  const nLc = colIndexToLetters(MC_TALLY_TF_PTS_COL);
-  const oLc = colIndexToLetters(MC_TALLY_MC_FIRST_Q_COL);
-  const pLc = colIndexToLetters(MC_TALLY_MC_LAST_Q_COL);
-  const qLc = colIndexToLetters(MC_TALLY_TF_FIRST_Q_COL);
-  const rLc = colIndexToLetters(MC_TALLY_TF_LAST_Q_COL);
+
+  const cq = configQuoted;
+  const ir = MC_CONFIG_INPUT_ROW;
+  const mLc = colIndexToLetters(MC_CONFIG_MC_PTS_COL);
+  const nLc = colIndexToLetters(MC_CONFIG_TF_PTS_COL);
+  const oLc = colIndexToLetters(MC_CONFIG_MC_FIRST_Q_COL);
+  const pLc = colIndexToLetters(MC_CONFIG_MC_LAST_Q_COL);
+  const qLc = colIndexToLetters(MC_CONFIG_TF_FIRST_Q_COL);
+  const rLc = colIndexToLetters(MC_CONFIG_TF_LAST_Q_COL);
+
   const maxPtsF =
-    `=${tq}!$${mLc}$${MC_TALLY_INPUT_ROW}*IF(OR(${tq}!$${oLc}$${MC_TALLY_INPUT_ROW}<1,` +
-    `${tq}!$${pLc}$${MC_TALLY_INPUT_ROW}<${tq}!$${oLc}$${MC_TALLY_INPUT_ROW},` +
-    `${tq}!$${oLc}$${MC_TALLY_INPUT_ROW}>${nMc},${tq}!$${pLc}$${MC_TALLY_INPUT_ROW}>${nMc}),0,` +
-    `${tq}!$${pLc}$${MC_TALLY_INPUT_ROW}-${tq}!$${oLc}$${MC_TALLY_INPUT_ROW}+1)+` +
-    `${tq}!$${nLc}$${MC_TALLY_INPUT_ROW}*IF(OR(${tq}!$${qLc}$${MC_TALLY_INPUT_ROW}=0,` +
-    `${tq}!$${rLc}$${MC_TALLY_INPUT_ROW}<${tq}!$${qLc}$${MC_TALLY_INPUT_ROW},` +
-    `${tq}!$${qLc}$${MC_TALLY_INPUT_ROW}>${nMc},${tq}!$${rLc}$${MC_TALLY_INPUT_ROW}>${nMc}),0,` +
-    `${tq}!$${rLc}$${MC_TALLY_INPUT_ROW}-${tq}!$${qLc}$${MC_TALLY_INPUT_ROW}+1)`;
+    `=${cq}!$${mLc}$${ir}*IF(OR(${cq}!$${oLc}$${ir}<1,${cq}!$${pLc}$${ir}<${cq}!$${oLc}$${ir},${cq}!$${oLc}$${ir}>${nMc},${cq}!$${pLc}$${ir}>${nMc}),0,` +
+    `${cq}!$${pLc}$${ir}-${cq}!$${oLc}$${ir}+1)+` +
+    `${cq}!$${nLc}$${ir}*IF(OR(${cq}!$${qLc}$${ir}=0,${cq}!$${rLc}$${ir}<${cq}!$${qLc}$${ir},${cq}!$${qLc}$${ir}>${nMc},${cq}!$${rLc}$${ir}>${nMc}),0,` +
+    `${cq}!$${rLc}$${ir}-${cq}!$${qLc}$${ir}+1)`;
   ws.getCell(2, 2).value = { formula: maxPtsF };
   ws.getCell(2, 4).value = nSa > 0 ? 150 : 0;
 

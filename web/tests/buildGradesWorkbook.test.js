@@ -12,12 +12,13 @@ import { quoteSheetNameForFormula } from "../js/colUtils.js";
 import {
   FIRST_STUDENT_ROW,
   MC_SUMMARY_GAP_ROWS,
-  MC_TALLY_INPUT_ROW,
-  MC_TALLY_MC_FIRST_Q_COL,
-  MC_TALLY_MC_LAST_Q_COL,
-  MC_TALLY_TF_FIRST_Q_COL,
-  MC_TALLY_TF_LAST_Q_COL,
+  MC_CONFIG_INPUT_ROW,
+  MC_CONFIG_MC_FIRST_Q_COL,
+  MC_CONFIG_MC_LAST_Q_COL,
+  MC_CONFIG_TF_FIRST_Q_COL,
+  MC_CONFIG_TF_LAST_Q_COL,
   SA_TRAILER_HEADERS,
+  SHEET_MC_TF_CONFIG,
 } from "../js/gradesSpec.js";
 
 describe("sortMcAnswerChoices", () => {
@@ -45,8 +46,8 @@ describe("buildMcKeyMatchFormula", () => {
   it("matches any letter in the row-2 key against the student first letter (AB accepts A or B)", () => {
     const f = buildMcKeyMatchFormula(2, 4);
     expect(f).toContain("$2");
-    expect(f).toContain("MID");
-    expect(f).toContain("SUMPRODUCT");
+    expect(f).toContain("SEARCH");
+    expect(f).toContain("ISNUMBER");
     expect(f).toContain("LEFT(TRIM(B4),1)");
   });
 
@@ -215,7 +216,7 @@ describe("buildGradesWorkbook", () => {
     expect(ok.value && typeof ok.value === "object" && "formula" in ok.value).toBe(true);
     expect(String(ok.value.formula)).toContain("'MC+TF'!");
     expect(String(ok.value.formula)).toContain("$2");
-    expect(String(ok.value.formula)).toContain("SUMPRODUCT");
+    expect(String(ok.value.formula)).toContain("ISNUMBER");
 
     const total = tally.getCell(4, 1).value;
     expect(total && typeof total === "object" && "formula" in total).toBe(true);
@@ -272,7 +273,7 @@ describe("buildGradesWorkbook", () => {
     expect(tot).toBeTruthy();
     const maxPts = tot.getCell(2, 2).value;
     expect(maxPts && typeof maxPts === "object" && "formula" in maxPts).toBe(true);
-    expect(String(maxPts.formula)).toContain("'MCtally'");
+    expect(String(maxPts.formula)).toContain("'MCTFConfiguration'");
 
     expect(tot.getCell(4, 4).value === "" || tot.getCell(4, 4).value == null).toBe(true);
 
@@ -328,12 +329,12 @@ describe("buildGradesWorkbook", () => {
     expect(cut.getCell(1, 1).value).toBe("Cutoff");
   });
 
-  it("stores MC/TF question index overrides on MCtally input row (columns O-R)", async () => {
+  it("stores MC/TF question index overrides on the configuration sheet", async () => {
     const exams = new Map([
       ["anon-fake-001", { 1: "A", 2: "B", 3: "C" }],
       ["anon-fake-002", { 1: "B", 2: "A", 3: "C" }],
     ]);
-    const ir = MC_TALLY_INPUT_ROW;
+    const ir = MC_CONFIG_INPUT_ROW;
     const blob = await buildGradesWorkbook(
       {
         reconciledCourse: "ZZ-UNIT-9200",
@@ -349,11 +350,11 @@ describe("buildGradesWorkbook", () => {
     const buf = await blob.arrayBuffer();
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buf);
-    const tally = wb.getWorksheet("MCtally");
-    expect(tally.getCell(ir, MC_TALLY_MC_FIRST_Q_COL).value).toBe(1);
-    expect(tally.getCell(ir, MC_TALLY_MC_LAST_Q_COL).value).toBe(2);
-    expect(tally.getCell(ir, MC_TALLY_TF_FIRST_Q_COL).value).toBe(3);
-    expect(tally.getCell(ir, MC_TALLY_TF_LAST_Q_COL).value).toBe(3);
+    const config = wb.getWorksheet(SHEET_MC_TF_CONFIG);
+    expect(config.getCell(ir, MC_CONFIG_MC_FIRST_Q_COL).value).toBe(1);
+    expect(config.getCell(ir, MC_CONFIG_MC_LAST_Q_COL).value).toBe(2);
+    expect(config.getCell(ir, MC_CONFIG_TF_FIRST_Q_COL).value).toBe(3);
+    expect(config.getCell(ir, MC_CONFIG_TF_LAST_Q_COL).value).toBe(3);
   });
 
   it("throws when MC and TF tally ranges overlap", async () => {

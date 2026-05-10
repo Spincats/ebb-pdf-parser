@@ -8,6 +8,7 @@ export const SHEET_MC = "MC+TF";
 /** F25-aligned tally sheet (Ok columns and points); encoded from plan when F25.xlsx is absent from repo */
 export const SHEET_MC_TALLY = "MCtally";
 export const SHEET_CUTOFFS = "Cutoffs";
+export const SHEET_MC_TF_CONFIG = "MCTFConfiguration";
 export const SHEET_TOTAL = "Total";
 
 /**
@@ -54,15 +55,14 @@ export const F25_GRADE_CUTOFF_ROWS = [
   [0.9, "A", 4],
 ];
 
-/** MCtally: row for points and range inputs (1-based) */
-export const MC_TALLY_INPUT_ROW = 2;
-/** MCtally: column letters for inputs (1-based indices) — M=13 through R=18 */
-export const MC_TALLY_MC_PTS_COL = 13;
-export const MC_TALLY_TF_PTS_COL = 14;
-export const MC_TALLY_MC_FIRST_Q_COL = 15;
-export const MC_TALLY_MC_LAST_Q_COL = 16;
-export const MC_TALLY_TF_FIRST_Q_COL = 17;
-export const MC_TALLY_TF_LAST_Q_COL = 18;
+/** MCTFConfiguration: layout for scoring inputs (1-based) */
+export const MC_CONFIG_INPUT_ROW = 2;
+export const MC_CONFIG_MC_PTS_COL = 1;
+export const MC_CONFIG_TF_PTS_COL = 2;
+export const MC_CONFIG_MC_FIRST_Q_COL = 3;
+export const MC_CONFIG_MC_LAST_Q_COL = 4;
+export const MC_CONFIG_TF_FIRST_Q_COL = 5;
+export const MC_CONFIG_TF_LAST_Q_COL = 6;
 
 /** Rows between last student row and the MC summary grid (F25 uses a gap of 3: data ends row 37, summary row 41). */
 export const MC_SUMMARY_GAP_ROWS = 3;
